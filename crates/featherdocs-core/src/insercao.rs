@@ -100,7 +100,7 @@ impl Sessao {
     /// Sumário personalizado: os sumários que já existem passam a mostrar até `niveis`, com ou sem número
     /// de página e pontilhado; sem nenhum no documento, insere um no cursor.
     pub fn sumario_configurar(&mut self, niveis: u8, numeros: bool, pontilhado: bool) -> Mudanca {
-        let novo = Conteudo::Sumario { niveis: niveis.clamp(1, 6), sem_numeros: !numeros, sem_pontilhado: !pontilhado, lista: 0 };
+        let novo = Conteudo::Sumario { niveis: niveis.clamp(1, 6), sem_numeros: !numeros, sem_pontilhado: !pontilhado, lista: 0, latex: false };
         let posicoes: Vec<usize> = self.doc.blocos.iter().enumerate().filter(|(_, b)| matches!(b.conteudo, Conteudo::Sumario { lista: 0, .. })).map(|(i, _)| i).collect();
         let (Some(&i0), Some(&i1)) = (posicoes.first(), posicoes.last()) else { return self.inserir_conteudo(novo) };
         let mut t = self.trabalho(i0, i1);
@@ -147,7 +147,7 @@ impl Sessao {
 
     /// Referências → Lista de figuras (1) ou de tabelas (2), no cursor.
     pub fn lista_inserir(&mut self, lista: u8) -> Mudanca {
-        self.inserir_conteudo(Conteudo::Sumario { niveis: 1, sem_numeros: false, sem_pontilhado: false, lista: lista.clamp(1, 2) })
+        self.inserir_conteudo(Conteudo::Sumario { niveis: 1, sem_numeros: false, sem_pontilhado: false, lista: lista.clamp(1, 2), latex: false })
     }
 
     /// Tira todos os sumários do documento.
@@ -320,7 +320,7 @@ mod testes {
         s.sumario_configurar(4, true, false);
         let v = achar(&s);
         assert_eq!(v.len(), 1, "não insere outro");
-        assert_eq!(v[0].conteudo, Conteudo::Sumario { niveis: 4, sem_numeros: false, sem_pontilhado: true, lista: 0 });
+        assert_eq!(v[0].conteudo, Conteudo::Sumario { niveis: 4, sem_numeros: false, sem_pontilhado: true, lista: 0, latex: false });
     }
 
     #[test]

@@ -189,6 +189,7 @@ mod testes {
                 Fonte { chave: "a&b".into(), tipo: TipoDeFonte::Artigo, autores: vec![Autor { sobrenome: "Silva".into(), nome: "Ana Maria".into() }], titulo: "Redes".into(), subtitulo: "teoria".into(), ano: "2020".into(), veiculo: "Revista".into(), volume: "3".into(), ..Fonte::default() },
                 Fonte { chave: "t".into(), tipo: TipoDeFonte::Tese, titulo: "Tese".into(), veiculo: "Tese (Doutorado)".into(), editora: "USP".into(), ..Fonte::default() },
             ],
+            sem_sl_sn: false,
         };
         assert_eq!(ler(gravar(&b).as_bytes()), Some(b));
         assert_eq!(ler(b"<outro/>"), None);

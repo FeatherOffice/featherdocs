@@ -20,6 +20,8 @@ pub mod insercao;
 pub mod tabela;
 pub mod estilos;
 pub mod codigo;
+pub mod realce;
+pub mod silabas;
 pub mod referencias;
 pub mod objetos;
 pub mod bibliografia;

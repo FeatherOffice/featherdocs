@@ -21,7 +21,7 @@ use std::fmt::Write as _;
 use std::io::{Cursor, Write};
 
 use featherdocs_core::layout::tamanho_base;
-use featherdocs_core::modelo::{Alinhamento, Atrib, Bloco, Celula, Conteudo, Documento, EstiloDeCitacao, Estilo, Faixas, Lista, Marca, Numeracao, NumeracaoDeLinhas, TipoDeRevisao, Trecho, Vertical, CODIGO, ITALICO, MATEMATICA, NEGRITO, SERIFA, SUBLINHADO, TACHADO};
+use featherdocs_core::modelo::{Alinhamento, Atrib, Bloco, Celula, Conteudo, Documento, EstiloDeCitacao, Estilo, Faixas, InicioDeSecao, Lista, Marca, Numeracao, NumeracaoDeLinhas, TipoDeRevisao, Trecho, Vertical, CODIGO, ITALICO, MATEMATICA, NEGRITO, SERIFA, SUBLINHADO, TACHADO};
 use zip::write::SimpleFileOptions;
 
 use crate::base64;
@@ -139,7 +139,8 @@ fn esc(s: &str) -> String {
 
 /// Uma corrida de texto puro (o `xml:space` guarda os espaços das pontas).
 fn t(texto: &str) -> String {
-    format!("<w:t xml:space=\"preserve\">{}</w:t>", esc(texto))
+    let partes: Vec<String> = texto.split(featherdocs_core::modelo::QUEBRA_DE_LINHA).map(|p| format!("<w:t xml:space=\"preserve\">{}</w:t>", esc(p))).collect();
+    partes.join("<w:br/>")
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +155,7 @@ fn tipo_de_lista(ordenado: bool, a: &Atrib) -> usize {
         Lista::Numerica => 1,
         Lista::Alfabetica => 2,
         Lista::Romana => 3,
+        Lista::RomanaMinuscula => 9,
         Lista::Circulo => 4,
         Lista::Quadrado => 5,
         Lista::Seta => 6,
@@ -163,7 +165,7 @@ fn tipo_de_lista(ordenado: bool, a: &Atrib) -> usize {
 }
 
 /// `(numFmt, lvlText do nível 0 — "%1" é o número; nos marcadores, o caractere)`.
-const TIPOS_DE_LISTA: [(&str, &str); 9] = [("bullet", ""), ("decimal", "%1."), ("lowerLetter", "%1)"), ("upperRoman", "%1."), ("bullet", "◦"), ("bullet", "▪"), ("bullet", "➢"), ("bullet", "☐"), ("bullet", "☒")];
+const TIPOS_DE_LISTA: [(&str, &str); 10] = [("bullet", ""), ("decimal", "%1."), ("lowerLetter", "%1)"), ("upperRoman", "%1."), ("bullet", "◦"), ("bullet", "▪"), ("bullet", "➢"), ("bullet", "☐"), ("bullet", "☒"), ("lowerRoman", "%1.")];
 
 /// Uma numeração concreta (`w:num`): o tipo e se recomeça do 1.
 struct Num {
@@ -178,7 +180,7 @@ struct Gravador<'a> {
     midias: Vec<(String, Vec<u8>)>,
     nums: Vec<Num>,
     /// O `numId` em uso por tipo de lista, dentro da lista atual.
-    em_uso: [Option<u32>; 9],
+    em_uso: [Option<u32>; TIPOS_DE_LISTA.len()],
     anterior_item: bool,
     figuras: u32,
     legendas: [u32; 3],
@@ -190,7 +192,7 @@ struct Gravador<'a> {
 
 impl<'a> Gravador<'a> {
     fn novo(doc: &'a Documento) -> Self {
-        Self { doc, rels: Vec::new(), midias: Vec::new(), nums: Vec::new(), em_uso: [None; 9], anterior_item: false, figuras: 0, legendas: [0; 3], notas: [Vec::new(), Vec::new()], revisoes: 0 }
+        Self { doc, rels: Vec::new(), midias: Vec::new(), nums: Vec::new(), em_uso: [None; TIPOS_DE_LISTA.len()], anterior_item: false, figuras: 0, legendas: [0; 3], notas: [Vec::new(), Vec::new()], revisoes: 0 }
     }
 
     fn rel(&mut self, tipo: &'static str, alvo: String, externo: bool) -> String {
@@ -217,7 +219,7 @@ impl<'a> Gravador<'a> {
     fn bloco(&mut self, b: &Bloco) -> String {
         let item = matches!(b.conteudo, Conteudo::Item { .. });
         if !item || !self.anterior_item {
-            self.em_uso = [None; 9];
+            self.em_uso = [None; TIPOS_DE_LISTA.len()];
         }
         self.anterior_item = item;
         match &b.conteudo {
@@ -232,6 +234,18 @@ impl<'a> Gravador<'a> {
             Conteudo::Sumario { niveis, sem_numeros, lista, .. } => sumario_xml(*niveis, *sem_numeros, *lista),
             Conteudo::Regua => "<w:p><w:pPr><w:pBdr><w:bottom w:val=\"single\" w:sz=\"6\" w:space=\"1\" w:color=\"auto\"/></w:pBdr></w:pPr></w:p>".into(),
             Conteudo::QuebraDePagina => "<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>".into(),
+            Conteudo::QuebraDeColuna => "<w:p><w:r><w:br w:type=\"column\"/></w:r></w:p>".into(),
+            Conteudo::QuebraDeSecao { inicio } => {
+                let tipo = match inicio {
+                    InicioDeSecao::ProximaPagina => "nextPage",
+                    InicioDeSecao::Continua => "continuous",
+                    InicioDeSecao::PaginaPar => "evenPage",
+                    InicioDeSecao::PaginaImpar => "oddPage",
+                };
+                // O w:type vem antes do w:pgSz na ordem do esquema; o papel da seção é o do documento.
+                let sec = secao(self.doc).replacen("<w:pgSz", &format!("<w:type w:val=\"{tipo}\"/><w:pgSz"), 1);
+                format!("<w:p><w:pPr>{sec}</w:pPr></w:p>")
+            }
             Conteudo::Bibliografia { todas } => self.bibliografia(*todas),
             Conteudo::IndiceRemissivo => lista_em_campo(" INDEX \\e \"\t\" \\h \"A\" \\c \"1\" ", "Índice", &[(String::new(), "Atualize o campo (F9) para montar o índice.".to_string())]),
         }
@@ -242,7 +256,7 @@ impl<'a> Gravador<'a> {
     fn bibliografia(&mut self, todas: bool) -> String {
         let b = &self.doc.bibliografia;
         let citadas = featherdocs_core::citacoes::chaves_citadas(&self.doc.blocos);
-        let entradas = featherdocs_core::bibliografia::lista(b.estilo, &b.fontes, &citadas, todas);
+        let entradas = featherdocs_core::bibliografia::lista(b.estilo, &b.fontes, &citadas, todas, b.sem_sl_sn);
         let recuo = if matches!(b.estilo, EstiloDeCitacao::Abnt) { 0.0 } else { 30.0 };
         let atrib = Atrib { recuo_esq: recuo, primeira: -recuo, depois: Some(8.0), ..Atrib::default() };
         let paragrafos: Vec<(String, String)> = entradas.iter().map(|t| (ppr(None, &atrib, ""), t.iter().map(corrida).collect())).collect();
@@ -294,7 +308,12 @@ impl<'a> Gravador<'a> {
             }
         };
         let extra = format!("<w:numPr><w:ilvl w:val=\"{}\"/><w:numId w:val=\"{num}\"/></w:numPr>", nivel.min(8));
-        format!("<w:p>{}{}</w:p>", ppr(Some("ListParagraph"), &b.atrib, &extra), self.trechos(texto))
+        // O recuo do item soma ao do nível (`nivel_de_lista`): o `w:ind` do parágrafo troca o da numeração.
+        let mut atrib = b.atrib;
+        if atrib.recuo_esq != 0.0 {
+            atrib.recuo_esq += RECUO_DO_NIVEL * f32::from(nivel.min(8) + 1);
+        }
+        format!("<w:p>{}{}</w:p>", ppr(Some("ListParagraph"), &atrib, &extra), self.trechos(texto))
     }
 
     fn trechos(&mut self, ts: &[Trecho]) -> String {
@@ -372,6 +391,8 @@ impl<'a> Gravador<'a> {
                 let rotulo = if tr.rotulo.is_empty() { format!("({})", chaves.join("; ")) } else { tr.rotulo.clone() };
                 format!("<w:fldSimple w:instr=\" CITATION {}{} \"><w:r>{}{}</w:r></w:fldSimple>", esc(&chaves.join(" \\m ")), esc(&p), rpr(tr), t(&rotulo))
             }
+            // shortcut: a imagem no meio da linha não vai para o DOCX; gravar como `w:drawing` em linha quando pedirem.
+            Marca::Imagem { .. } => String::new(),
         }
     }
 
@@ -774,6 +795,9 @@ fn estilo_com_nome_xml(e: &Estilo) -> String {
     let rpr = rpr.strip_prefix("<w:rPr>").and_then(|r| r.strip_suffix("</w:rPr>")).unwrap_or("");
     estilo_de_paragrafo(&format!("FDEstilo{}", e.id), &e.nome, Some(&base), &ppr, rpr).replacen("<w:style ", "<w:style w:customStyle=\"1\" ", 1)
 }
+
+/// O recuo de cada nível de lista no Word, em pontos (720 twips).
+pub(crate) const RECUO_DO_NIVEL: f32 = 36.0;
 
 fn nivel_de_lista(tipo: usize, nivel: u8) -> String {
     let (fmt, texto) = TIPOS_DE_LISTA[tipo];

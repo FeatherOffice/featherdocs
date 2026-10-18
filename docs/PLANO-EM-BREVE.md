@@ -136,7 +136,7 @@ texto e a nota é Ctrl+clique, como na referência cruzada.
 | `comentarios_mostrar` | filtro na tela: todos, só os abertos, só os do autor. O autor é o nome em Arquivo → Opções (sem conta, rule 5). |
 | `modo_edicao` | `Sessao.modo: Editando\|Sugerindo\|Leitura`. Em "Sugerindo", digitar grava `Rev::Insercao` e apagar marca `Rev::Remocao` em vez de remover (depende da fase 0.2). docx: `w:ins`/`w:del`. |
 | `aceitar` / `rejeitar` | a alteração sob o cursor, ou todas: o motor aplica ou descarta a `Rev`. |
-| `historico` | a **janela Versões…** que está pendente: lista `documento_versoes` (já existe na ponte nativa), mostra uma versão em modo leitura, "Restaurar" e "Comparar com a atual". |
+| `historico` | a **janela Versões…** que está pendente: lista `documento_versoes` (já existe em `featherdocs-historico::versoes`), mostra uma versão em modo leitura, "Restaurar" e "Comparar com a atual". |
 | `comparar` | diff de duas versões (do histórico ou de outro arquivo): alinha blocos pelo `id` e, dentro de cada bloco, compara palavra a palavra (crate `similar`, Rust puro). O resultado é um documento com `Rev` marcadas, que se aceita ou rejeita com os comandos acima. |
 | `proteger` | **Decisão**: (a) "só leitura" por trecho ou documento, sem segredo, como o Word; ou (b) **criptografar o `.fdoz`** com senha (`aes-gcm` + `argon2`, Rust puro). Recomendo fazer (a) agora e (b) como opção separada em Salvar como…. |
 

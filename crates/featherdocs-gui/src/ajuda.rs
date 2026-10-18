@@ -3,8 +3,9 @@
 use feather_ui::ajuda::{Catalogo, Linha, Secao, Topico};
 use serde_json::Value;
 use std::sync::OnceLock;
-const JSON_PT: &str = include_str!("../../../src/idiomas/pt-BR.json");
-const JSON_EN: &str = include_str!("../../../src/idiomas/en-US.json");
+const JSON_PT: &str = include_str!("../dados/ajuda/pt-BR.json");
+const JSON_EN: &str = include_str!("../dados/ajuda/en-US.json");
+const JSON_ES: &str = include_str!("../dados/ajuda/es-ES.json");
 const TOPICOS: &[&str] = &[
     "comecar", "formatar", "estrutura", "tabelas", "pagina", "arquivos", "configuracoes",
 ];
@@ -18,7 +19,7 @@ const GRUPOS: &[(&str, &[(&str, &str)])] = &[
         ("desfazer","Ctrl+Z"), ("refazer","Ctrl+Y / Ctrl+Shift+Z"),
         ("selTudo","Ctrl+A"), ("area","Ctrl+C / Ctrl+X / Ctrl+V"),
         ("colarSem","Ctrl+Shift+V"), ("apagar","Backspace / Delete"),
-        ("enter","Enter"), ("tab","Tab / Shift+Tab"),
+        ("enter","Enter"), ("linhaQuebra","Shift+Enter"), ("tab","Tab / Shift+Tab"),
         ("quebra","Ctrl+Enter"), ("esc","Esc"),
     ]),
     ("formato", &[
@@ -30,6 +31,7 @@ const GRUPOS: &[(&str, &[(&str, &str)])] = &[
     ("arquivo", &[
         ("novo","Ctrl+N"), ("abrir","Ctrl+O"),
         ("salvar","Ctrl+S"), ("salvarComo","Ctrl+Shift+S"),
+        ("exportarPdf","Ctrl+P"),
     ]),
     ("janela", &[("ajuda","F1"), ("fechar","Esc")]),
 ];
@@ -42,7 +44,7 @@ fn tr(root: &Value, key: &str) -> String {
     caminho(root,key).and_then(Value::as_str).unwrap_or(key).to_owned()
 }
 fn carregar(idioma: &str) -> Catalogo {
-    let origem = if idioma.starts_with("en") { JSON_EN } else { JSON_PT };
+    let origem = if idioma.starts_with("en") { JSON_EN } else if idioma.starts_with("es") { JSON_ES } else { JSON_PT };
     let json: Value=serde_json::from_str(origem).expect("Localidade de Ajuda inválida");
     let uso=TOPICOS.iter().map(|id| {
         let raiz=format!("ajuda.comoUsar.{id}");
@@ -77,17 +79,18 @@ fn carregar(idioma: &str) -> Catalogo {
         ],
     }
 }
+/// A Ajuda no idioma atual da interface (cada idioma é montado uma vez).
 pub fn modelo() -> &'static Catalogo {
-    static MODELO: OnceLock<Catalogo>=OnceLock::new();
-    MODELO.get_or_init(|| carregar(
-        &std::env::var("FEATHEROFFICE_LANG").unwrap_or_else(|_| "pt-BR".into())
-    ))
+    static MODELOS: [OnceLock<Catalogo>; 3] = [OnceLock::new(), OnceLock::new(), OnceLock::new()];
+    let idioma = crate::localidade::atual();
+    let i = crate::localidade::IDIOMAS.iter().position(|(c, _)| *c == idioma).unwrap_or(0);
+    MODELOS[i].get_or_init(|| carregar(idioma))
 }
 #[cfg(test)]
 mod tests {
     use super::*;
     #[test] fn idiomas_originais_têm_mesma_cobertura() {
-        for idioma in ["pt-BR","en-US"] {
+        for idioma in ["pt-BR","en-US","es-ES"] {
             let c=carregar(idioma);
             assert_eq!(c.secoes[0].topicos.len(),7);
             assert_eq!(c.secoes[1].topicos.len(),5);
@@ -99,9 +102,10 @@ mod tests {
         assert_eq!(c.secoes.len(),2);
         assert_eq!(c.secoes[0].topicos.len(),7);
         assert_eq!(c.secoes[1].topicos.len(),5);
-        assert_eq!(c.secoes[1].topicos.iter().map(|t|t.linhas.len()).sum::<usize>(),30);
+        assert_eq!(c.secoes[1].topicos.iter().map(|t|t.linhas.len()).sum::<usize>(),32);
         assert!(c.quantidade_encontrada("formatação")>0);
         assert!(c.quantidade_encontrada("Ctrl+Shift+V")>0);
+        assert!(c.quantidade_encontrada("Ctrl+P")>0);
         for s in &c.secoes {
             for t in &s.topicos { assert!(!t.titulo.contains("ajuda.")); }
         }

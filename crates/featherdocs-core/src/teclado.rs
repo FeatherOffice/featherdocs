@@ -51,6 +51,7 @@ impl Sessao {
             ("Backspace", c, false) => self.apagar(true, c),
             ("Delete", c, false) => self.apagar(false, c),
             ("Enter", true, false) => self.inserir_bloco("quebra_de_pagina"),
+            ("Enter", false, false) if shift => self.inserir_texto(&crate::modelo::QUEBRA_DE_LINHA.to_string()),
             ("Enter", false, false) => self.enter(),
             ("Tab", false, false) => self.tab(shift),
             ("Escape", false, false) => {

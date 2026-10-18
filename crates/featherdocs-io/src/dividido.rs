@@ -8,7 +8,7 @@
 
 use std::mem::discriminant;
 
-use featherdocs_core::modelo::{Alinhamento, Atrib, Bloco, Conteudo, Documento, Lista, Meta, Numeracao};
+use featherdocs_core::modelo::{Alinhamento, Atrib, Bloco, ConfigPagina, Conteudo, Documento, Extras, Lista, Meta, Numeracao};
 
 use crate::exportar::{bloco_markdown, bloco_tex};
 use crate::{latex, markdown};
@@ -37,6 +37,14 @@ pub struct Reconciliado {
     pub blocos: Vec<Bloco>,
     pub meta: Option<Meta>,
     pub numeracao: Option<Numeracao>,
+    /// O papel e as margens que o código descreve (LaTeX com `geometry` ou `a4paper`/`letterpaper`);
+    /// `None` = o código não diz, a página fica como está.
+    pub pagina: Option<ConfigPagina>,
+    /// O que vale para a página e o código diz (cabeçalho, rodapé, cor, marca d'água…), sobre o que
+    /// o documento tinha; `None` = nada mudou.
+    pub extras: Option<Extras>,
+    /// O que o leitor não converteu (só no LaTeX), com a linha no código.
+    pub avisos: Vec<crate::latex::Aviso>,
 }
 
 /// Acima disto (blocos de antes × blocos novos no trecho que mudou), não se procura o que ficou
@@ -112,6 +120,21 @@ fn herdar(velho: &Bloco, novo: &Bloco, fonte: Fonte) -> Bloco {
         if n.recuo_dir != padrao.recuo_dir { atrib.recuo_dir = n.recuo_dir; }
         if n.primeira != padrao.primeira { atrib.primeira = n.primeira; }
     }
+    // A imagem embutida no documento aparece no código só pelo nome (`figura-7.png`, ou o do `.tex`
+    // aberto): o nome no código não traz os bytes, então a embutida fica.
+    let mut conteudo = novo.conteudo.clone();
+    if let (Conteudo::Imagem { origem: o_velho, largura: l_velha, altura: a_velha, .. }, Conteudo::Imagem { origem, largura, altura, .. }) = (&velho.conteudo, &mut conteudo) {
+        if o_velho.starts_with("data:") && !origem.starts_with("data:") {
+            origem.clone_from(o_velho);
+            // A altura saiu dos pixels do arquivo, que o código não traz: segue a proporção de antes.
+            if *altura <= 0.0 && *a_velha > 0.0 && *l_velha > 0.0 {
+                if *largura <= 0.0 {
+                    *largura = *l_velha;
+                }
+                *altura = *largura * a_velha / l_velha;
+            }
+        }
+    }
     // O editor de código não representa mesclagens. Conserva-as quando a
     // estrutura da tabela permanece idêntica, sem descartar formato por engano.
     let mesclagens = match (&velho.conteudo, &novo.conteudo) {
@@ -121,15 +144,23 @@ fn herdar(velho: &Bloco, novo: &Bloco, fonte: Fonte) -> Bloco {
             velho.mesclagens.clone(),
         _ => Vec::new(),
     };
-    Bloco { id: velho.id, conteudo: novo.conteudo.clone(), atrib, mesclagens }
+    // Os fios do LaTeX valem enquanto as linhas forem as mesmas.
+    let latex = match (&velho.conteudo, &novo.conteudo) {
+        (Conteudo::Tabela { linhas: a, .. }, Conteudo::Tabela { linhas: b, .. }) if a.len() == b.len() => velho.latex.clone(),
+        _ => String::new(),
+    };
+    Bloco { id: velho.id, conteudo, atrib, mesclagens, latex }
 }
 
 /// O código de volta para os blocos, guardando o que não mudou.
 pub fn reconciliar(antigo: &Documento, fonte: Fonte, codigo: &str) -> Reconciliado {
-    let lido = match fonte {
-        Fonte::Markdown => markdown::ler(codigo),
+    let (lido, avisos) = match fonte {
+        Fonte::Markdown => (markdown::ler(codigo), Vec::new()),
         // `\maketitle` vira título e autor na leitura de um arquivo; aqui eles já são a meta do documento.
-        Fonte::Latex => latex::ler(&codigo.replace("\\maketitle", "")),
+        Fonte::Latex => {
+            let l = latex::ler_com_fontes(&codigo.replace("\\maketitle", ""), &antigo.bibliografia.fontes);
+            (l.documento, l.avisos)
+        }
     };
     let numeracao_nova = if fonte == Fonte::Latex { lido.estilos.numeracao } else { antigo.estilos.numeracao };
     let velhos: Vec<String> = antigo.blocos.iter().map(|b| digital(fonte, b, antigo.estilos.numeracao)).collect();
@@ -161,7 +192,31 @@ pub fn reconciliar(antigo: &Documento, fonte: Fonte, codigo: &str) -> Reconcilia
     }
     let meta = (fonte == Fonte::Latex && lido.meta != antigo.meta).then(|| lido.meta.clone());
     let numeracao = (fonte == Fonte::Latex).then_some(numeracao_nova);
-    Reconciliado { blocos, meta, numeracao }
+    let preambulo = codigo.split("\\begin{document}").next().unwrap_or("");
+    let diz_a_pagina = ["{geometry}", "\\geometry", "a4paper", "letterpaper"].iter().any(|m| preambulo.contains(m));
+    let pagina = (fonte == Fonte::Latex && diz_a_pagina).then_some(lido.pagina);
+    let extras = (fonte == Fonte::Latex).then(|| {
+        // Só o que o leitor sabe tirar do código; a borda da página, a revisão e a proteção ficam.
+        let (l, mut e) = (&lido.extras, antigo.extras.clone());
+        e.cabecalho.clone_from(&l.cabecalho);
+        e.rodape.clone_from(&l.rodape);
+        e.primeira_diferente = l.primeira_diferente;
+        e.cor_pagina = l.cor_pagina;
+        e.marca.clone_from(&l.marca);
+        e.marca_cor = l.marca_cor;
+        e.vertical = l.vertical;
+        e.numerar_linhas = l.numerar_linhas;
+        e.formato_notas = l.formato_notas;
+        e
+    }).filter(|e| *e != antigo.extras);
+    Reconciliado { blocos, meta, numeracao, pagina, extras, avisos }
+}
+
+/// Duas páginas iguais a menos do arredondamento do código (as medidas vão em cm com duas casas).
+pub fn mesma_pagina(a: &ConfigPagina, b: &ConfigPagina) -> bool {
+    [(a.largura, b.largura), (a.altura, b.altura), (a.margem_sup, b.margem_sup), (a.margem_dir, b.margem_dir), (a.margem_inf, b.margem_inf), (a.margem_esq, b.margem_esq)]
+        .iter()
+        .all(|(x, y)| (x - y).abs() < 0.3)
 }
 
 #[cfg(test)]
@@ -262,6 +317,54 @@ mod testes {
         assert_eq!(r.numeracao, Some(Numeracao::Decimal));
         assert!(r.blocos[0].atrib.sem_numero, "a capa (\\section*) não ganha número");
         assert!(!r.blocos[2].atrib.sem_numero);
+    }
+
+    #[test]
+    fn margens_vao_para_o_latex_e_voltam_dele() {
+        let mut d = markdown::ler("Texto.\n");
+        d.pagina = ConfigPagina { largura: 841.89, altura: 595.28, margem_sup: 85.04, margem_dir: 56.69, margem_inf: 56.69, margem_esq: 85.04 };
+        let codigo = exportar::latex(&d);
+        assert!(codigo.contains("\\usepackage[a4paper, landscape, top=3.00cm, bottom=2.00cm, left=3.00cm, right=2.00cm]{geometry}"), "{codigo}");
+        let r = reconciliar(&Documento::default(), Fonte::Latex, &codigo);
+        assert!(mesma_pagina(&r.pagina.expect("o código diz a página"), &d.pagina), "{:?}", r.pagina);
+        // Sem geometry no código, a página do documento não muda.
+        assert!(reconciliar(&d, Fonte::Latex, "\\documentclass{article}\n\\begin{document}\nTexto.\n\\end{document}").pagina.is_none());
+    }
+
+    #[test]
+    fn layout_e_formatacao_vao_para_o_latex_e_voltam() {
+        use featherdocs_core::modelo::{Faixas, Fmt, NumeracaoDeLinhas, Trecho, Vertical};
+        let mut d = markdown::ler("Primeiro parágrafo.\n\nSegundo parágrafo.\n\nTerceiro.\n");
+        d.extras.cabecalho = Faixas { direita: "{pagina}".into(), ..Faixas::default() };
+        d.extras.rodape = Faixas { esquerda: "Relatório".into(), ..Faixas::default() };
+        d.extras.cor_pagina = 0xFFF8E7FF;
+        d.extras.marca = "RASCUNHO".into();
+        d.extras.numerar_linhas = NumeracaoDeLinhas::Continua;
+        d.extras.primeira_diferente = true;
+        d.extras.vertical = Vertical::Centro;
+        d.blocos[1].atrib.alinhamento = Alinhamento::Centro;
+        d.blocos[2].atrib.alinhamento = Alinhamento::Justificado;
+        d.blocos[2].atrib.antes = Some(12.0);
+        if let Conteudo::Paragrafo { texto } = &mut d.blocos[0].conteudo {
+            texto.push(Trecho { texto: " marcado".into(), fmt: Fmt { realce: 0xFFFF00FF, ..Fmt::default() }, ..Trecho::default() });
+            texto.push(Trecho { texto: "2".into(), fmt: Fmt { posicao: 1, ..Fmt::default() }, ..Trecho::default() });
+        }
+        let codigo = exportar::latex(&d);
+        let lido = crate::latex::ler(&codigo);
+        // O texto e o fio voltam; a letra é a do corpo do LaTeX.
+        let sem_letra = |f: &featherdocs_core::modelo::Faixas| (f.esquerda.clone(), f.centro.clone(), f.direita.clone(), f.fio);
+        assert_eq!(sem_letra(&lido.extras.cabecalho), sem_letra(&d.extras.cabecalho), "{codigo}");
+        assert_eq!(sem_letra(&lido.extras.rodape), sem_letra(&d.extras.rodape));
+        assert_eq!((lido.extras.cor_pagina, lido.extras.marca.as_str(), lido.extras.numerar_linhas), (0xFFF8E7FF, "RASCUNHO", NumeracaoDeLinhas::Continua));
+        assert!(lido.extras.primeira_diferente);
+        assert_eq!(lido.extras.vertical, Vertical::Centro);
+        let alinhamentos: Vec<_> = lido.blocos.iter().map(|b| b.atrib.alinhamento).collect();
+        assert_eq!(alinhamentos, [Alinhamento::Esquerda, Alinhamento::Centro, Alinhamento::Justificado], "{codigo}");
+        assert_eq!(lido.blocos[2].atrib.antes, Some(12.0));
+        let Conteudo::Paragrafo { texto } = &lido.blocos[0].conteudo else { panic!() };
+        assert_eq!(featherdocs_core::inline::texto_puro(texto), "Primeiro parágrafo. marcado2");
+        assert!(texto.iter().any(|t| t.texto.contains("marcado") && t.fmt.realce == 0xFFFF00FF), "{texto:?}");
+        assert!(texto.iter().any(|t| t.texto == "2" && t.fmt.posicao == 1));
     }
 }
 

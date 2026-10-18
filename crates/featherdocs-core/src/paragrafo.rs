@@ -18,6 +18,7 @@ fn lista_de(nome: &str) -> Result<(Lista, bool), String> {
         "numerica" => (Lista::Numerica, true),
         "alfabetica" => (Lista::Alfabetica, true),
         "romana" => (Lista::Romana, true),
+        "romana_minuscula" => (Lista::RomanaMinuscula, true),
         _ => return Err(format!("Estilo de lista desconhecido: \"{nome}\".")),
     })
 }

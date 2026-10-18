@@ -62,7 +62,14 @@ impl Leitor<'_> {
         Ok(v)
     }
     fn texto(&mut self) -> Result<String, String> {
-        let n = u16::from_le_bytes(self.bytes()?) as usize;
+        let n = usize::from(u16::from_le_bytes(self.bytes()?));
+        self.utf8(n)
+    }
+    fn texto_longo(&mut self) -> Result<String, String> {
+        let n = u32::from_le_bytes(self.bytes()?) as usize;
+        self.utf8(n)
+    }
+    fn utf8(&mut self, n: usize) -> Result<String, String> {
         let fim = self.pos.checked_add(n).ok_or("Quadro inválido.")?;
         let b = self.bytes.get(self.pos..fim).ok_or("Texto incompleto.")?;
         self.pos = fim;
@@ -113,7 +120,7 @@ impl Quadro {
                 },
                 4 => Operacao::Imagem {
                     rect: l.valores()?,
-                    origem: l.texto()?,
+                    origem: l.texto_longo()?,
                 },
                 _ => return Err("Operação desconhecida no quadro.".into()),
             });

@@ -124,25 +124,61 @@ fn campos(corpo: &str) -> Vec<(String, String)> {
                 None => break,
             }
         }
-        v.push((nome, acentos(&texto).split_whitespace().collect::<Vec<_>>().join(" ")));
+        // Os autores ficam com as chaves: `{Agência Nacional}` é uma entidade, e o "and" de dentro não separa.
+        let limpo = if nome == "author" || nome == "editor" { texto } else { acentos(&texto) };
+        v.push((nome, limpo.split_whitespace().collect::<Vec<_>>().join(" ")));
         resto = depois.trim_start_matches(',');
     }
     v
 }
 
-/// "Silva, João and Souza, Maria" ou "João Silva and Maria Souza".
+/// "Silva, João and Souza, Maria" ou "João Silva and Maria Souza"; `{Agência Nacional}` (tudo entre
+/// chaves) é uma entidade e vai inteira no sobrenome. Recebe o texto ainda com as chaves.
 fn autores(s: &str) -> Vec<Autor> {
-    s.split(" and ")
+    // Separa no " and " fora de chaves.
+    let mut partes = Vec::new();
+    let (mut nivel, mut inicio) = (0i32, 0);
+    for (i, c) in s.char_indices() {
+        match c {
+            '{' => nivel += 1,
+            '}' => nivel -= 1,
+            ' ' if nivel == 0 && s[i..].starts_with(" and ") => {
+                partes.push(&s[inicio..i]);
+                inicio = i + 5;
+            }
+            _ => {}
+        }
+    }
+    partes.push(&s[inicio..]);
+    partes
+        .into_iter()
         .map(str::trim)
-        .filter(|a| !a.is_empty())
-        .map(|a| match a.split_once(',') {
-            Some((sobrenome, nome)) => Autor { sobrenome: sobrenome.trim().to_string(), nome: nome.trim().to_string() },
-            None => match a.rsplit_once(' ') {
-                Some((nome, sobrenome)) => Autor { sobrenome: sobrenome.to_string(), nome: nome.to_string() },
-                None => Autor { sobrenome: a.to_string(), nome: String::new() },
-            },
+        // O "and others" do BibTeX é o "et al.", não um autor chamado Others.
+        .filter(|a| !a.is_empty() && !a.eq_ignore_ascii_case("others"))
+        .map(|a| {
+            // Entidade: a chave que abre no começo só fecha no último caractere.
+            let mut nivel = 0;
+            let fecha_no_fim = a.starts_with('{')
+                && a.char_indices().all(|(i, c)| {
+                    nivel += (c == '{') as i32 - (c == '}') as i32;
+                    nivel > 0 || i + 1 == a.len()
+                });
+            match fecha_no_fim.then(|| &a[1..a.len() - 1]) {
+                Some(e) => Autor { sobrenome: acentos(e), nome: String::new() },
+                None => pessoa(&acentos(a)),
+            }
         })
         .collect()
+}
+
+fn pessoa(a: &str) -> Autor {
+    match a.split_once(',') {
+        Some((sobrenome, nome)) => Autor { sobrenome: sobrenome.trim().to_string(), nome: nome.trim().to_string() },
+        None => match a.rsplit_once(' ') {
+            Some((nome, sobrenome)) => Autor { sobrenome: sobrenome.to_string(), nome: nome.to_string() },
+            None => Autor { sobrenome: a.to_string(), nome: String::new() },
+        },
+    }
 }
 
 fn fonte_de(tipo: &str, chave: &str, campos: Vec<(String, String)>) -> Fonte {
@@ -162,8 +198,16 @@ fn fonte_de(tipo: &str, chave: &str, campos: Vec<(String, String)>) -> Fonte {
             "number" | "issue" => f.numero = v,
             "pages" => f.paginas = v,
             "url" => f.url = v,
-            "urldate" | "accessed" | "note" if f.acesso.is_empty() && (nome != "note" || v.to_lowercase().contains("acess")) => f.acesso = v,
+            "urldate" | "accessed" | "note" if f.acesso.is_empty() && (nome != "note" || v.to_lowercase().contains("acess")) => {
+                // "Acesso em 10 out. 2024" no campo: a referência já escreve o "Acesso em:".
+                let t = v.trim();
+                let sem = t.get(..9).filter(|p| p.eq_ignore_ascii_case("acesso em")).map_or(t, |_| t[9..].trim_start_matches(':').trim());
+                f.acesso = sem.to_string();
+            }
             "doi" => f.doi = v,
+            "keywords" => f.palavras = v,
+            // `note = {\url{https://…}}`: só o endereço (as chaves já saíram).
+            "note" => f.nota = v.trim().trim_start_matches("\\url").trim_matches(['{', '}']).to_string(),
             _ => {}
         }
     }
@@ -179,7 +223,12 @@ pub fn ler(texto: &str) -> Vec<Fonte> {
         let Some(abre) = resto.find(['{', '(']) else { break };
         let tipo = resto[..abre].trim().to_string();
         let corpo_e_resto = &resto[abre..];
-        let (corpo, n) = valor(&corpo_e_resto.replacen('(', "{", 1));
+        // `@book(chave, …)` vale como `@book{…}`; só o parêntese que abre a entrada vira chave (um
+        // `(` dentro de uma URL não).
+        let (corpo, n) = match corpo_e_resto.strip_prefix('(') {
+            Some(r) => valor(&format!("{{{}", r.replacen(')', "}", 1))),
+            None => valor(corpo_e_resto),
+        };
         resto = &corpo_e_resto[n.min(corpo_e_resto.len())..];
         if matches!(tipo.to_ascii_lowercase().as_str(), "comment" | "string" | "preamble") {
             continue;
@@ -199,7 +248,7 @@ pub fn gravar(fontes: &[Fonte]) -> String {
     let mut s = String::new();
     for f in fontes {
         s.push_str(&format!("@{}{{{},\n", tipo_para_bibtex(f.tipo), f.chave));
-        let autores = f.autores.iter().map(|a| if a.nome.is_empty() { a.sobrenome.clone() } else { format!("{}, {}", a.sobrenome, a.nome) }).collect::<Vec<_>>().join(" and ");
+        let autores = f.autores.iter().map(|a| if a.nome.is_empty() && a.sobrenome.contains(' ') { format!("{{{}}}", a.sobrenome) } else if a.nome.is_empty() { a.sobrenome.clone() } else { format!("{}, {}", a.sobrenome, a.nome) }).collect::<Vec<_>>().join(" and ");
         let veiculo = match f.tipo {
             TipoDeFonte::Artigo => "journal",
             TipoDeFonte::Capitulo => "booktitle",
@@ -223,6 +272,8 @@ pub fn gravar(fontes: &[Fonte]) -> String {
             ("number", f.numero.as_str()),
             ("pages", f.paginas.as_str()),
             ("doi", f.doi.as_str()),
+            ("keywords", f.palavras.as_str()),
+            ("note", f.nota.as_str()),
             ("url", f.url.as_str()),
             ("urldate", f.acesso.as_str()),
         ] {
@@ -272,5 +323,33 @@ mod testes {
     fn grava_e_le_de_volta_igual() {
         let f = ler(BIB);
         assert_eq!(ler(&gravar(&f)), f);
+    }
+
+    #[test]
+    fn acesso_e_others_do_bibtex() {
+        let f = &ler("@online{a, author={Rodrigues, W. and others}, title={T}, urldate={Acesso em 10 out. 2024}}")[0];
+        assert_eq!(f.acesso, "10 out. 2024");
+        assert_eq!(f.autores.len(), 1);
+    }
+
+    #[test]
+    fn parentese_na_url_nao_engole_as_entradas_seguintes() {
+        let f = ler("@misc{a, url={https://x.com/#:~:text=matriz%20(ou,de%20y.}, year={2024}}\n@misc{b, year={2020}}");
+        assert_eq!(f.iter().map(|f| (f.chave.as_str(), f.ano.as_str())).collect::<Vec<_>>(), [("a", "2024"), ("b", "2020")]);
+    }
+
+    #[test]
+    fn entidade_entre_chaves_e_and_dentro_delas() {
+        let f = ler("@misc{a, author = {{Ag\\^encia Nacional de Energia} and {Barnes and Noble} and {Ag} {Nac}}, title={T}}");
+        assert_eq!(
+            f[0].autores,
+            vec![
+                Autor { sobrenome: "Agência Nacional de Energia".into(), nome: String::new() },
+                Autor { sobrenome: "Barnes and Noble".into(), nome: String::new() },
+                Autor { sobrenome: "Nac".into(), nome: "Ag".into() },
+            ]
+        );
+        // Volta igual: a entidade é gravada entre chaves.
+        assert_eq!(ler(&gravar(&f))[0].autores, f[0].autores);
     }
 }

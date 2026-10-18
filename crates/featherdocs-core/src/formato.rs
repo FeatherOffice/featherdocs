@@ -125,6 +125,7 @@ fn nome_da_lista(l: Lista) -> &'static str {
         Lista::Numerica => "numerica",
         Lista::Alfabetica => "alfabetica",
         Lista::Romana => "romana",
+        Lista::RomanaMinuscula => "romana_minuscula",
     }
 }
 
@@ -220,7 +221,7 @@ impl Sessao {
     /// `codigo`, `equacao`). Repetir `item`, `item_ordenado` ou `citacao` desfaz (volta a parágrafo). `tabela`, `sumario`,
     /// `regua` e `quebra_de_pagina` não são estilo: inserem um bloco.
     pub fn paragrafo_estilo(&mut self, tipo: &str) -> Mudanca {
-        if matches!(tipo, "tabela" | "sumario" | "regua" | "quebra_de_pagina") {
+        if matches!(tipo, "tabela" | "sumario" | "regua" | "quebra_de_pagina" | "quebra_de_coluna" | "secao_proxima" | "secao_continua" | "secao_par" | "secao_impar") {
             return self.inserir_bloco(tipo);
         }
         let (mut t, _, _) = self.trabalho_da_selecao();
@@ -567,6 +568,30 @@ mod testes {
         s.desfazer().unwrap();
         s.desfazer().unwrap();
         assert!(matches!(&s.documento().blocos[0].conteudo, Conteudo::Tabela { linhas, .. } if linhas.len() == 3));
+    }
+
+    #[test]
+    fn quebra_de_secao_em_pagina_impar_deixa_uma_em_branco_e_a_continua_nao_quebra() {
+        let mut s = doc(&["a"]);
+        s.inserir_bloco("secao_par");
+        assert_eq!(s.total_de_paginas(), 2, "a página 2 já é par");
+        let mut s = doc(&["a"]);
+        s.inserir_bloco("secao_impar");
+        assert_eq!(s.total_de_paginas(), 3, "a 2 fica em branco para a seção começar na 3");
+        let mut s = doc(&["a"]);
+        s.inserir_bloco("secao_continua");
+        assert_eq!(s.total_de_paginas(), 1);
+        s.inserir_bloco("quebra_de_coluna");
+        assert_eq!(s.total_de_paginas(), 2, "com uma coluna, a quebra de coluna vai para a página seguinte");
+    }
+
+    #[test]
+    fn quebra_de_linha_termina_a_linha_sem_dividir_o_paragrafo() {
+        let mut s = doc(&["a"]);
+        s.inserir_texto(&crate::modelo::QUEBRA_DE_LINHA.to_string());
+        s.inserir_texto("b");
+        assert_eq!(tipos(&s), vec!["paragrafo"]);
+        assert_eq!(s.layouts[0].linhas.len(), 2);
     }
 
     #[test]

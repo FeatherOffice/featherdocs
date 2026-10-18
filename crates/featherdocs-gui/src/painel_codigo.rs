@@ -23,6 +23,11 @@ pub const PAUSA: Duration = Duration::from_millis(300);
 /// A fonte monoespaçada do sistema (DejaVu Sans Mono, Consolas…). A Liberation Mono embutida
 /// tem maiúsculas baixas demais nesse corpo: na tela o código parecia todo em minúsculas.
 pub const FONTE_MONO: Font = Font::MONOSPACE;
+pub const TAMANHO: f32 = 13.5;
+pub const PADDING: f32 = 10.;
+/// A altura de uma linha do editor: o `LineHeight` padrão do Iced (1,3 × o tamanho), o mesmo do
+/// `text` dos números de linha, que assim ficam alinhados.
+pub const ALTURA_DA_LINHA: f32 = TAMANHO * 1.3;
 
 pub struct PainelCodigo {
     pub fonte: Fonte,
@@ -143,6 +148,10 @@ pub fn gerar(doc: &Documento, fonte: Fonte, original: Option<&(Fonte, String)>) 
 fn descreve(doc: &Documento, fonte: Fonte, texto: &str) -> bool {
     let r = dividido::reconciliar(doc, fonte, texto);
     r.meta.is_none()
+        && r.pagina.is_none_or(|p| dividido::mesma_pagina(&p, &doc.pagina))
+        // Sem geometry no texto, ele só descreve a página que a leitura dele daria (A4, 2,54 cm).
+        && (r.pagina.is_some() || dividido::mesma_pagina(&featherdocs_core::modelo::ConfigPagina::a4(), &doc.pagina))
+        && r.extras.is_none()
         && r.numeracao.is_none_or(|n| n == doc.estilos.numeracao)
         && r.blocos == doc.blocos
 }
@@ -214,27 +223,44 @@ pub fn trechos_da_linha(fonte: Fonte, texto: &str, dentro: bool) -> (Vec<(Range<
     }
 }
 
-/// A cor e o peso de cada tipo. O comando usa a cor de destaque da suíte e o comentário a cor
-/// apagada do tema; os demais tipos usam tons de sintaxe próprios para cada tema (o `feather_ui::tema`
-/// ainda não tem tokens de realce de código), legíveis no claro e no escuro.
+/// Os temas do realce (Configurações → Exibição). Cada um: comando, chave, matemática, ambiente,
+/// ênfase e link, no claro e no escuro. O `feather_ui::tema` ainda não tem tokens de realce de
+/// código; o "Feather" usa a cor de destaque da suíte no comando.
+pub const TEMAS: [&str; 4] = ["Feather", "Overleaf", "Monokai", "Solarizado"];
+const PALETAS: [([u32; 6], [u32; 6]); 4] = [
+    ([0, 0xb05a00, 0x8a2be2, 0x0b7f7f, 0xa0306a, 0x0b7f7f], [0, 0xe5a35a, 0xc39bff, 0x5fd0c8, 0xe88abf, 0x5fd0c8]),
+    ([0x1f4fa8, 0x8a5300, 0x0b7a3b, 0x8b1c62, 0x8b1c62, 0x1f4fa8], [0x7aa7ff, 0xe0b36a, 0x7fd49a, 0xe08ac0, 0xe08ac0, 0x7aa7ff]),
+    ([0xc4245c, 0x8f7f00, 0x7a4fd6, 0x4f8a10, 0xc56a00, 0x1f8aa3], [0xf92672, 0xe6db74, 0xae81ff, 0xa6e22e, 0xfd971f, 0x66d9ef]),
+    ([0x268bd2, 0xb58900, 0x6c71c4, 0x2aa198, 0xd33682, 0xcb4b16], [0x268bd2, 0xb58900, 0x6c71c4, 0x2aa198, 0xd33682, 0xcb4b16]),
+];
+static TEMA: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+pub fn definir_tema(i: usize) {
+    TEMA.store(i.min(TEMAS.len() - 1), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// As cores do tema `i` no tema claro/escuro atual, na ordem de [`PALETAS`] (para a amostra).
+pub fn cores_do_tema(i: usize) -> [Color; 6] {
+    let (claro, noturno) = PALETAS[i.min(TEMAS.len() - 1)];
+    let p = if feather_ui::tema::escuro() { noturno } else { claro };
+    p.map(|v| if v == 0 { feather_ui::tema::COR_AZUL_ACENTO() } else { Color::from_rgb8((v >> 16) as u8, (v >> 8) as u8, v as u8) })
+}
+
+/// A cor e o peso de cada tipo; o comentário usa sempre a cor apagada do tema da suíte.
 pub fn formato(tipo: &Tipo, _tema: &iced::Theme) -> Format<Font> {
-    use feather_ui::tema::{escuro, COR_AZUL_ACENTO, COR_TEXTO_MUTED};
-    let tom = |claro: u32, noturno: u32| {
-        let v = if escuro() { noturno } else { claro };
-        Color::from_rgb8((v >> 16) as u8, (v >> 8) as u8, v as u8)
-    };
+    let [comando, chave, matematica, ambiente, enfase, link] = cores_do_tema(TEMA.load(std::sync::atomic::Ordering::Relaxed));
     let negrito = Font { weight: font::Weight::Bold, ..FONTE_MONO };
     let italico = Font { style: font::Style::Italic, ..FONTE_MONO };
     let (cor, fonte) = match tipo {
-        Tipo::Comando => (COR_AZUL_ACENTO(), None),
-        Tipo::Comentario => (COR_TEXTO_MUTED(), Some(italico)),
-        Tipo::Chave | Tipo::Codigo => (tom(0xb05a00, 0xe5a35a), None),
-        Tipo::Matematica => (tom(0x8a2be2, 0xc39bff), None),
-        Tipo::Ambiente => (tom(0x0b7f7f, 0x5fd0c8), Some(negrito)),
-        Tipo::Titulo => (COR_AZUL_ACENTO(), Some(negrito)),
-        Tipo::Enfase => (tom(0xa0306a, 0xe88abf), None),
-        Tipo::Link => (tom(0x0b7f7f, 0x5fd0c8), None),
-        Tipo::Marcador | Tipo::Citacao => (tom(0xb05a00, 0xe5a35a), Some(negrito)),
+        Tipo::Comando => (comando, None),
+        Tipo::Comentario => (feather_ui::tema::COR_TEXTO_MUTED(), Some(italico)),
+        Tipo::Chave | Tipo::Codigo => (chave, None),
+        Tipo::Matematica => (matematica, None),
+        Tipo::Ambiente => (ambiente, Some(negrito)),
+        Tipo::Titulo => (comando, Some(negrito)),
+        Tipo::Enfase => (enfase, None),
+        Tipo::Link => (link, None),
+        Tipo::Marcador | Tipo::Citacao => (chave, Some(negrito)),
     };
     Format { color: Some(cor), font: fonte }
 }

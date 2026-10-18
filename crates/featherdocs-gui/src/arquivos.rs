@@ -1,6 +1,7 @@
 //! Leitura por extensão e gravação atômica sem expor arquivos parcialmente escritos.
+use crate::localidade::{tr, trf};
 use featherdocs_core::modelo::Documento;
-use featherdocs_io::{abrir, Formato};
+use featherdocs_io::{abrir_na_pasta, Formato};
 use std::{
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -11,29 +12,24 @@ pub fn ler(p: &Path) -> Result<Documento, String> {
         .extension()
         .and_then(|e| e.to_str())
         .and_then(Formato::da_extensao)
-        .ok_or("Formato não suportado. Use .fdoz, .docx, .md ou .tex.")?;
+        .ok_or_else(|| tr("Formato não suportado. Use .fdoz, .docx, .md, .tex ou .zip (projeto LaTeX).").to_string())?;
     // Recusa por metadados antes de alocar e limita a leitura real:
     // evita arquivo esparso ou stream que cresça enquanto é lido.
     const LIMITE: u64 = 256 * 1024 * 1024;
     let arquivo = std::fs::File::open(p)
-        .map_err(|e| format!("Não consegui abrir {}: {e}", p.display()))?;
+        .map_err(|e| trf("Não consegui abrir {}: {}", &[&p.display(), &e]))?;
     if arquivo.metadata().map(|m| m.len() > LIMITE).unwrap_or(false) {
-        return Err(format!(
-            "O arquivo {} ultrapassa o limite seguro de 256 MiB.",
-            p.display()
-        ));
+        return Err(trf("O arquivo {} ultrapassa o limite seguro de 256 MiB.", &[&p.display()]));
     }
     let mut bytes = Vec::new();
     arquivo.take(LIMITE + 1).read_to_end(&mut bytes)
-        .map_err(|e| format!("Erro ao ler {}: {e}", p.display()))?;
+        .map_err(|e| trf("Erro ao ler {}: {}", &[&p.display(), &e]))?;
     if bytes.len() as u64 > LIMITE {
-        return Err(format!(
-            "O arquivo {} ultrapassa o limite seguro de 256 MiB.",
-            p.display()
-        ));
+        return Err(trf("O arquivo {} ultrapassa o limite seguro de 256 MiB.", &[&p.display()]));
     }
-    abrir(formato, &bytes)
-        .map_err(|e| format!("Documento {} inválido: {e}", p.display()))
+    // O .tex pega ao lado dele o que usa: \input, o .bib e as imagens.
+    abrir_na_pasta(formato, &bytes, p.parent())
+        .map_err(|e| trf("Documento {} inválido: {}", &[&p.display(), &e]))
 }
 pub fn bytes(doc: &Documento, ext: &str) -> Result<Vec<u8>, String> {
     match Formato::da_extensao(ext) {
@@ -41,8 +37,19 @@ pub fn bytes(doc: &Documento, ext: &str) -> Result<Vec<u8>, String> {
         Some(Formato::Docx) => featherdocs_io::docx::gravar(doc),
         Some(Formato::Markdown) => Ok(featherdocs_io::exportar::markdown(doc).into_bytes()),
         Some(Formato::Latex) => Ok(featherdocs_io::exportar::latex(doc).into_bytes()),
-        None => Err("Formato de saída não suportado.".into()),
+        Some(Formato::LatexZip) => featherdocs_io::exportar::latex_zip(doc),
+        None => Err(tr("Formato de saída não suportado.").into()),
     }
+}
+/// O `.fdoz` novo com o histórico do anterior (o próprio destino, ou o `.fdoz` aberto num
+/// "Salvar como") e uma versão a mais. Anterior ilegível: começa um histórico novo em vez de não salvar.
+pub fn com_historico(novo: Vec<u8>, destino: &Path, origem: Option<&Path>) -> Result<Vec<u8>, String> {
+    let fdoz = |c: &&Path| c.extension().is_some_and(|e| e.eq_ignore_ascii_case("fdoz"));
+    let anterior = [Some(destino), origem].into_iter().flatten().filter(fdoz).find_map(|c| std::fs::read(c).ok());
+    let autor = std::env::var("USER").or_else(|_| std::env::var("USERNAME")).unwrap_or_default();
+    let mensagem = tr("Versão salva");
+    featherdocs_historico::gravar_com_historico(&novo, anterior.as_deref(), &autor, mensagem)
+        .or_else(|_| featherdocs_historico::gravar_com_historico(&novo, None, &autor, mensagem))
 }
 pub fn gravar(p: &Path, bytes: &[u8]) -> Result<(), String> {
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -56,7 +63,7 @@ pub fn gravar(p: &Path, bytes: &[u8]) -> Result<(), String> {
         .write(true)
         .create_new(true)
         .open(&tmp)
-        .map_err(|e| format!("Não consegui preparar o salvamento: {e}"))?;
+        .map_err(|e| trf("Não consegui preparar o salvamento: {}", &[&e]))?;
     let resultado = (|| {
         f.write_all(bytes)?;
         f.sync_all()?;
@@ -66,7 +73,7 @@ pub fn gravar(p: &Path, bytes: &[u8]) -> Result<(), String> {
     if resultado.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
-    resultado.map_err(|e| format!("Não consegui salvar {}: {e}", p.display()))
+    resultado.map_err(|e| trf("Não consegui salvar {}: {}", &[&p.display(), &e]))
 }
 #[cfg(test)]
 mod tests {
@@ -112,6 +119,22 @@ mod tests {
         assert_eq!(ler(&p).unwrap(), *s.documento());
         assert!(gravar(&p.join("arquivo"), "não deve substituir".as_bytes()).is_err());
         assert_eq!(std::fs::read(&p).unwrap(), b);
+        std::fs::remove_file(p).unwrap();
+    }
+
+    #[test]
+    fn salvar_duas_vezes_guarda_as_duas_versoes() {
+        let p = std::env::temp_dir().join(format!("featherdocs-historico-{}.fdoz", std::process::id()));
+        let _ = std::fs::remove_file(&p);
+        let mut s = featherdocs_core::sessao::Sessao::default();
+        for texto in ["primeira", " segunda"] {
+            s.inserir_texto(texto);
+            let b = com_historico(bytes(s.documento(), "fdoz").unwrap(), &p, None).unwrap();
+            gravar(&p, &b).unwrap();
+        }
+        let b = std::fs::read(&p).unwrap();
+        assert_eq!(featherdocs_historico::versoes(&b).unwrap().len(), 2);
+        assert_eq!(ler(&p).unwrap(), *s.documento());
         std::fs::remove_file(p).unwrap();
     }
 }

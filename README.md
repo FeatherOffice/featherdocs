@@ -40,10 +40,6 @@ documento ficam dentro do arquivo, sem servidor.
 | [`featherdocs-tabelas`](crates/featherdocs-tabelas) | inserir/excluir linha e coluna, mesclar células, pelo motor comum `feather-tables` |
 | [`feather-math`](crates/feather-math) | composição de fórmulas LaTeX com a Latin Modern Math embutida |
 | [`featherdocs-gui`](crates/featherdocs-gui) | a interface nativa em Iced |
-| [`featherdocs-ponte`](crates/featherdocs-ponte) | camada de comandos da interface antiga (referência de paridade) |
-
-A pasta `src/` guarda a interface antiga em TypeScript/Tauri, mantida como
-referência enquanto a migração para Iced termina.
 
 ## Compilar
 

@@ -288,6 +288,21 @@ mod testes {
     }
 
     #[test]
+    fn linha_do_sumario_leva_ao_titulo() {
+        let mut d = Documento::vazio();
+        d.acrescentar(Conteudo::sumario(3));
+        d.acrescentar(Conteudo::Titulo { nivel: 1, texto: analisar("Introdução") });
+        d.acrescentar(Conteudo::Titulo { nivel: 2, texto: analisar("Objetivo") });
+        let s = Sessao::com_documento(d);
+        let f = &s.paginas[0].fatias[0];
+        let l = &s.layouts[0].linhas;
+        // A terceira linha (depois do título "Sumário" e de "Introdução") é a de "Objetivo".
+        let y = s.documento().pagina.margem_sup + f.y + l[0].altura + l[1].altura + l[2].altura / 2.0;
+        assert_eq!(s.alvo_do_sumario(0, y), Some(s.documento().blocos[2].id));
+        assert_eq!(s.alvo_do_sumario(0, s.documento().pagina.margem_sup + f.y + 1.0), None);
+    }
+
+    #[test]
     fn numeracao_desenha_o_numero_e_entra_no_sumario() {
         let mut d = Documento::vazio();
         d.acrescentar(Conteudo::sumario(3));

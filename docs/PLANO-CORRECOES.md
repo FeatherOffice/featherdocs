@@ -9,7 +9,7 @@ até algumas centenas de páginas.
 
 ## Primeiro: perda de dados
 
-- [ ] **1. Salvar `.fdoz` pela GUI apaga o histórico de versões.**
+- [X] **1. Salvar `.fdoz` pela GUI apaga o histórico de versões.** (18/10: `arquivos::com_historico`, teste `salvar_duas_vezes_guarda_as_duas_versoes`)
   `crates/featherdocs-gui/src/arquivos.rs:40` grava com
   `featherdocs_io::fdoz::gravar`, que não leva o `.git/` embutido. O
   contrato do formato (README, `FORMATO.md` da suíte) diz que as versões
@@ -25,7 +25,7 @@ até algumas centenas de páginas.
 
 ## Depois: velocidade em documento grande
 
-- [ ] **2. Toda mensagem refaz os quadros de todas as páginas.**
+- [X] **2. Toda mensagem refaz os quadros de todas as páginas.** (18/10: sem mudança de versão nada é refeito; digitando, só as páginas perto da vista — `refazer_visiveis`; as outras ao rolar até elas)
   `app.rs:373` chama `sessao.quadro(p, u64::MAX)` para cada página a cada
   `atualizar()`, inclusive movimento de mouse e rolagem. Em documento de
   200 páginas isso é trabalho por quadro que cresce com o tamanho.
@@ -69,15 +69,26 @@ até algumas centenas de páginas.
 
 ## Limpeza (sem efeito para quem usa)
 
-- [ ] **7. Código morto no leitor LaTeX.**
+- [X] **7. Código morto no leitor LaTeX.** (18/10: `MARCA_DE_ROTULO` e `rotular` estão em uso; saíram `numeros`, `contadores` e `contar`)
   `crates/featherdocs-io/src/latex/avisos.rs`: `MARCA_DE_ROTULO`, `rotular`,
   `contar` e os campos `rotulos`, `numeros`, `contadores` não são usados
   (o compilador avisa). Apagar, depois de conferir com `grep` que nada os
   chama.
 
-- [ ] **8. Import sem uso no motor.**
+- [X] **8. Import sem uso no motor.**
   `crates/featherdocs-core/src/sessao.rs:17` importa `compor_em` sem usar.
   Apagar.
+
+## Segunda auditoria (18/10/2026, tarde) — feito
+
+- [X] Bomba de ZIP: `.docx` e `.fdoz` descompactam cada parte só até 256 MiB (`featherdocs_io::ler_limitado`).
+- [X] Autor-entidade do `.bib` (`{{Agência Nacional…}}`) e "and" dentro de chaves; a gravação devolve as chaves.
+- [X] A marca "quebra de página/coluna/seção" e a grade não saem no PDF (`Sessao::quadro_impresso`).
+- [X] `\%`, `\&`, `\_` e `\#` dentro de `\text{}` nas fórmulas.
+- [X] Tabela do LaTeX que cabe numa página não se parte.
+- [X] `\appendix`: títulos em letras (A, A.1), `\ref` acompanha, o `.fdoz` guarda (`Atrib.apendice`) e o `.tex` exportado escreve.
+- [X] Abrir link/PDF no sistema não deixa processo "defunto".
+- [X] Interface Tauri/TypeScript antiga e `featherdocs-ponte` apagadas; os textos da ajuda e as fontes foram para `crates/featherdocs-gui/dados/`.
 
 ## Já resolvido na separação do repositório (18/10/2026)
 

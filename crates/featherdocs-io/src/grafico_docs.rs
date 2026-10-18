@@ -382,7 +382,7 @@ mod testes {
             format!("<svg>{PREFIXO}{}{SUFIXO}</svg>", crate::base64::codificar(&serde_json::to_vec(&v).unwrap())).as_bytes(),
         );
         doc.acrescentar(Conteudo::Imagem { origem: url, legenda: Vec::new(), largura: 440.0, altura: 250.0 });
-        let mut sessao = Sessao::com_documento(doc);
+        let sessao = Sessao::com_documento(doc);
         // O adaptador rejeita referência inválida antes de editar o documento.
         let imagem = sessao.documento().blocos.last().unwrap();
         let Conteudo::Imagem { origem, .. } = &imagem.conteudo else { unreachable!() };

@@ -152,12 +152,13 @@ fn volta_igual_listas_tabela_equacao_e_especiais() {
     item(&mut d, false, 0, "tarefa", Lista::Tarefa);
     d.blocos.last_mut().unwrap().atrib.marcado = true;
     item(&mut d, true, 0, "romano", Lista::Romana);
+    item(&mut d, true, 0, "romano minúsculo", Lista::RomanaMinuscula);
     d.acrescentar(Conteudo::Tabela { cabecalho: true, linhas: vec![vec![analisar("a"), analisar("**b**")], vec![analisar("1"), analisar("2")]] });
     d.acrescentar(Conteudo::Equacao { latex: "\\frac{a}{b}".into() });
     d.acrescentar(Conteudo::Regua);
     d.acrescentar(Conteudo::QuebraDePagina);
     d.acrescentar(Conteudo::sumario(2));
-    d.acrescentar(Conteudo::Sumario { niveis: 3, sem_numeros: true, sem_pontilhado: false, lista: 1 });
+    d.acrescentar(Conteudo::Sumario { niveis: 3, sem_numeros: true, sem_pontilhado: false, lista: 1, latex: false });
     d.acrescentar(Conteudo::Paragrafo { texto: analisar("Gráfico de vendas") });
     d.blocos.last_mut().unwrap().atrib.legenda = 1;
     assert_eq!(sem_ids(&ida_e_volta(&d)), sem_ids(&d));
@@ -178,8 +179,8 @@ fn volta_igual_pagina_estilos_e_cabecalho() {
     let mut d = Documento::vazio();
     d.pagina = ConfigPagina { largura: 841.89, altura: 595.28, margem_sup: 50.0, margem_dir: 40.0, margem_inf: 60.0, margem_esq: 70.0 };
     d.extras = Extras {
-        cabecalho: Faixas { esquerda: "{titulo}".into(), centro: String::new(), direita: "{autor} & cia".into() },
-        rodape: Faixas { esquerda: String::new(), centro: "Página {pagina} de {total}".into(), direita: "{pagina_romano}".into() },
+        cabecalho: Faixas { esquerda: "{titulo}".into(), centro: String::new(), direita: "{autor} & cia".into(), ..Faixas::default() },
+        rodape: Faixas { esquerda: String::new(), centro: "Página {pagina} de {total}".into(), direita: "{pagina_romano}".into(), ..Faixas::default() },
         primeira_diferente: true,
         cor_pagina: 0xFFF8_E7FF,
         borda_cor: 0x0000_80FF,
@@ -280,4 +281,28 @@ fn sugestoes_comentarios_e_protecao_voltam_pelo_word() {
     assert!(volta.extras.controlar_alteracoes && volta.extras.protegido);
     let Conteudo::Paragrafo { texto: t2 } = &volta.blocos[0].conteudo else { panic!() };
     assert_eq!(t2, &texto);
+}
+
+#[test]
+fn volta_igual_quebras_de_secao_coluna_e_linha() {
+    use featherdocs_core::modelo::{InicioDeSecao, QUEBRA_DE_LINHA};
+    let mut d = Documento::vazio();
+    d.acrescentar(Conteudo::Paragrafo { texto: vec![Trecho::simples(&format!("linha 1{QUEBRA_DE_LINHA}linha 2"))] });
+    d.acrescentar(Conteudo::QuebraDeColuna);
+    for inicio in [InicioDeSecao::ProximaPagina, InicioDeSecao::Continua, InicioDeSecao::PaginaPar, InicioDeSecao::PaginaImpar] {
+        d.acrescentar(Conteudo::QuebraDeSecao { inicio });
+    }
+    d.acrescentar(Conteudo::Paragrafo { texto: analisar("fim") });
+    assert_eq!(sem_ids(&ida_e_volta(&d)), sem_ids(&d));
+}
+
+#[test]
+fn recuo_do_item_soma_ao_do_nivel_e_volta() {
+    let mut d = Documento::vazio();
+    d.acrescentar(Conteudo::Item { ordenado: true, nivel: 0, texto: analisar("Um") });
+    d.acrescentar(Conteudo::Item { ordenado: false, nivel: 1, texto: analisar("Dois") });
+    d.blocos[0].atrib.recuo_esq = 9.5;
+    let volta = ida_e_volta(&d);
+    // O Word recua 36 pt por nível; o que passa disso é o recuo do item.
+    assert_eq!(volta.blocos.iter().map(|b| b.atrib.recuo_esq).collect::<Vec<_>>(), [9.5, 0.0]);
 }

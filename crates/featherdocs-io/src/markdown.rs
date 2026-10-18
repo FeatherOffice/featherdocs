@@ -129,7 +129,7 @@ impl Leitor {
             "[lot]" => Some(2),
             _ => None,
         } {
-            Conteudo::Sumario { niveis: 1, sem_numeros: false, sem_pontilhado: false, lista }
+            Conteudo::Sumario { niveis: 1, sem_numeros: false, sem_pontilhado: false, lista, latex: false }
         } else if let Some(c) = bloco_gerado(&texto_puro(&texto)) {
             c
         } else {

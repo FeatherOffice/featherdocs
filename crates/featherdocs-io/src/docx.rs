@@ -15,9 +15,9 @@
 //! linha. Não lê o `.doc` antigo (binário). Gravar: `docx_gravar.rs`.
 
 use std::collections::HashMap;
-use std::io::{Cursor, Read};
+use std::io::Cursor;
 
-use featherdocs_core::modelo::{Alinhamento, Atrib, Celula, ConfigPagina, Conteudo, Documento, Estilo, Faixas, Fmt, Lista, Marca, Numeracao, NumeracaoDeLinhas, Revisao, TipoDeRevisao, Trecho, Vertical, CODIGO, ITALICO, MATEMATICA, NEGRITO, SERIFA, SUBLINHADO, TACHADO};
+use featherdocs_core::modelo::{Alinhamento, Atrib, Celula, ConfigPagina, Conteudo, Documento, Estilo, Faixas, Fmt, InicioDeSecao, Lista, Marca, Numeracao, NumeracaoDeLinhas, Revisao, TipoDeRevisao, Trecho, Vertical, CODIGO, QUEBRA_DE_LINHA, ITALICO, MATEMATICA, NEGRITO, SERIFA, SUBLINHADO, TACHADO};
 use quick_xml::events::{BytesRef, BytesStart, Event};
 use quick_xml::{Reader, XmlVersion};
 
@@ -167,10 +167,7 @@ fn papel_conhecido(mut p: ConfigPagina) -> ConfigPagina {
 }
 
 fn parte(zip: &mut Zip, nome: &str) -> Option<Vec<u8>> {
-    let mut f = zip.by_name(nome).ok()?;
-    let mut v = Vec::new();
-    f.read_to_end(&mut v).ok()?;
-    Some(v)
+    crate::ler_limitado(zip.by_name(nome).ok()?).ok()
 }
 
 /// O alvo de uma relação de `word/document.xml` como caminho dentro do ZIP.
@@ -476,7 +473,8 @@ fn tipo_do_nivel(fmt: &str, texto: &str, ilvl: u8) -> TipoDeLista {
     let numerada = !matches!(fmt, "bullet" | "none" | "");
     let lista = match fmt {
         "lowerLetter" | "upperLetter" => Lista::Alfabetica,
-        "lowerRoman" | "upperRoman" => Lista::Romana,
+        "lowerRoman" => Lista::RomanaMinuscula,
+        "upperRoman" => Lista::Romana,
         _ if numerada => Lista::Padrao,
         _ if texto == MARCADORES_PADRAO[usize::from(ilvl) % 3] => Lista::Padrao,
         _ => match texto {
@@ -687,7 +685,7 @@ fn faixas_de(mut p: Vec<String>, jc: &str) -> Faixas {
         2 => Faixas { esquerda: p.remove(0), centro: p.remove(0), ..Faixas::default() },
         _ => {
             let direita = p[2..].join(" ");
-            Faixas { esquerda: p[0].clone(), centro: p[1].clone(), direita }
+            Faixas { esquerda: p[0].clone(), centro: p[1].clone(), direita, ..Faixas::default() }
         }
     }
 }
@@ -742,6 +740,10 @@ struct Par {
     outline: Option<u8>,
     quebra_antes: bool,
     quebra_depois: bool,
+    /// Quebra de coluna no parágrafo (`w:br w:type="column"`).
+    coluna: bool,
+    /// O parágrafo fecha uma seção (`w:sectPr` no `w:pPr`): onde a seguinte começa.
+    secao: Option<InicioDeSecao>,
     trechos: Vec<Trecho>,
     imagens: Vec<(String, f32, f32)>,
     atrib: Atrib,
@@ -980,6 +982,7 @@ impl Leitor {
                 self.math_xml.clear();
             }
             "m:oMathPara" => self.com_par(|p| p.equacao = true),
+            "w:sectPr" if self.pai() == "w:pPr" => self.com_par(|p| p.secao = Some(InicioDeSecao::ProximaPagina)),
             "w:tbl" => self.abre_tabela(),
             "w:tr" => {
                 if let Some(t) = &mut self.tabela {
@@ -1134,6 +1137,16 @@ impl Leitor {
 
     /// `w:sectPr`: papel, margens, borda, números de linha, alinhamento vertical, cabeçalho e rodapé.
     fn secao(&mut self, nome: &str, e: &BytesStart, pai: &str) {
+        if (pai, nome) == ("w:sectPr", "w:type") && self.dentro("w:pPr") {
+            let inicio = match atributo(e, "w:val").as_deref() {
+                Some("continuous") => InicioDeSecao::Continua,
+                Some("evenPage") => InicioDeSecao::PaginaPar,
+                Some("oddPage") => InicioDeSecao::PaginaImpar,
+                _ => InicioDeSecao::ProximaPagina,
+            };
+            self.com_par(|p| p.secao = Some(inicio));
+            return;
+        }
         let x = &mut self.doc.extras;
         let p = &mut self.doc.pagina;
         match (pai, nome) {
@@ -1187,9 +1200,12 @@ impl Leitor {
                     p.quebra_antes = true;
                 }
             });
+        } else if atributo(e, "w:type").as_deref() == Some("column") {
+            self.com_par(|p| p.coluna = true);
         } else if self.par.is_some() {
             let codigo = self.estilo_do_par().is_some_and(|s| s.nome.contains("code") || s.nome.contains("preformatted"));
-            self.empurrar(if codigo { "\n" } else { " " });
+            let linha = QUEBRA_DE_LINHA.to_string();
+            self.empurrar(if codigo { "\n" } else { &linha });
         }
     }
 
@@ -1293,6 +1309,8 @@ impl Leitor {
         } else if p.equacao {
             let latex: String = p.trechos.iter().map(|t| t.texto.as_str()).collect();
             self.acrescentar(Conteudo::Equacao { latex: latex.trim().to_string() }, p.atrib);
+        } else if vazio && (p.secao.is_some() || p.coluna) && p.trechos.is_empty() {
+            // Parágrafo vazio que só carrega a quebra: ela entra sozinha, logo abaixo.
         } else if vazio && p.imagens.is_empty() && !p.quebra_antes && !p.quebra_depois {
             if p.atrib.borda == 8 && p.trechos.is_empty() {
                 self.doc.acrescentar(Conteudo::Regua);
@@ -1308,6 +1326,12 @@ impl Leitor {
         }
         if p.quebra_depois {
             self.doc.acrescentar(Conteudo::QuebraDePagina);
+        }
+        if p.coluna {
+            self.doc.acrescentar(Conteudo::QuebraDeColuna);
+        }
+        if let Some(inicio) = p.secao {
+            self.doc.acrescentar(Conteudo::QuebraDeSecao { inicio });
         }
     }
 
@@ -1332,6 +1356,8 @@ impl Leitor {
             let tipo = self.numeracao.listas.get(&(num.clone(), p.ilvl)).copied().unwrap_or_default();
             atrib.lista = tipo.lista;
             atrib.marcado = tipo.marcado;
+            // O `w:ind` do item conta da margem; no FeatherDocs o recuo é o que passa do nível.
+            atrib.recuo_esq = (atrib.recuo_esq - crate::docx_gravar::RECUO_DO_NIVEL * f32::from(p.ilvl + 1)).max(0.0);
             return (Conteudo::Item { ordenado: tipo.numerada, nivel: p.ilvl.min(5), texto }, atrib);
         }
         if nome.contains("quote") || nome.contains("citação") {
@@ -1372,7 +1398,7 @@ fn sumario_de(instr: &str) -> Conteudo {
         _ => 0,
     };
     let sem_numeros = instr.split_whitespace().any(|p| p == "\\n");
-    Conteudo::Sumario { niveis, sem_numeros, sem_pontilhado: false, lista }
+    Conteudo::Sumario { niveis, sem_numeros, sem_pontilhado: false, lista, latex: false }
 }
 
 #[cfg(test)]

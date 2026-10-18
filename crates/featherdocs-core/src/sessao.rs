@@ -14,8 +14,8 @@ use crate::alvo::{eh_atomico, primeiro_alvo};
 use crate::cursor::{Cursor, Pos};
 use crate::edicao::{tabela_de_texto, tabela_em_texto, trechos_de};
 use crate::inline::texto_puro;
-use crate::layout::{compor_em, lista_gerada, sumario, texto_do_titulo, EntradaSumario, Entorno, LayoutBloco};
-use crate::modelo::{Bloco, ConfigPagina, Conteudo, Documento, Estilo, Estilos};
+use crate::layout::{lista_gerada, sumario, texto_do_titulo, EntradaSumario, Entorno, LayoutBloco};
+use crate::modelo::{Atrib, Bloco, ConfigPagina, Conteudo, Documento, Estilo, Estilos};
 use crate::paginacao::{alinhar_na_vertical, marcadores, numeros, paginar, Pagina};
 
 const MAXIMO_DESFAZER: usize = 2000;
@@ -269,41 +269,95 @@ impl Sessao {
 
     fn compor_e_paginar(&mut self) {
         let limite = self.doc.pagina.largura_util();
+        crate::layout::composicao_tex(self.doc.extras.composicao_tex);
         self.numeros = numeros(&self.doc.blocos, self.doc.estilos.numeracao, &self.rotulo_capitulo, &self.rotulos_legenda);
         let entradas = self.entradas_do_sumario();
+        // Documento do LaTeX: as listas geradas levam o título como um `\section*` e o texto na família do corpo.
+        let secao = self.doc.blocos.iter().find_map(|b| match b.conteudo {
+            Conteudo::Titulo { nivel: 1, .. } if !b.latex.is_empty() => Estilo::do_latex(1, &b.latex),
+            _ => None,
+        });
+        let serifa = if secao.is_some() { self.doc.blocos.iter().find_map(|b| match &b.conteudo { Conteudo::Paragrafo { texto } => texto.first().map(|t| t.estilo & crate::modelo::SERIFA), _ => None }).unwrap_or(0) } else { 0 };
+        let marcas = marcadores(&self.doc.blocos);
         let mut layouts = Vec::with_capacity(self.doc.blocos.len());
-        for (b, numero) in self.doc.blocos.iter().zip(&self.numeros) {
+        for (i, (b, numero)) in self.doc.blocos.iter().zip(&self.numeros).enumerate() {
+            // Logo depois de um título ("Referências" escrito pela pessoa), a lista não repete o dela.
+            let depois_de_titulo = i > 0 && matches!(self.doc.blocos[i - 1].conteudo, Conteudo::Titulo { .. });
             let lay = match &b.conteudo {
-                Conteudo::Sumario { niveis, sem_numeros, sem_pontilhado, lista: 0 } => Arc::new(sumario(&entradas, *niveis, (!*sem_numeros, !*sem_pontilhado), limite, &self.rotulo_sumario)),
-                Conteudo::Sumario { sem_numeros, sem_pontilhado, lista, .. } => {
+                Conteudo::Sumario { niveis, sem_numeros, sem_pontilhado, lista: 0, latex } => Arc::new(sumario(&entradas, *niveis, (!*sem_numeros, !*sem_pontilhado, *latex), limite, &self.rotulo_sumario, secao.as_ref())),
+                Conteudo::Sumario { sem_numeros, sem_pontilhado, lista, latex, .. } => {
                     let k = usize::from(*lista).min(2);
-                    Arc::new(sumario(&self.entradas_da_lista(*lista), 1, (!*sem_numeros, !*sem_pontilhado), limite, &self.rotulos_lista[k - 1]))
+                    Arc::new(sumario(&self.entradas_da_lista(*lista), 1, (!*sem_numeros, !*sem_pontilhado, *latex), limite, &self.rotulos_lista[k - 1], secao.as_ref()))
                 }
-                Conteudo::Bibliografia { todas } => Arc::new(lista_gerada(&self.rotulo_referencias, &self.paragrafos_da_bibliografia(*todas), limite)),
-                Conteudo::IndiceRemissivo => Arc::new(lista_gerada(&self.rotulo_indice, &self.paragrafos_do_indice(), limite)),
+                Conteudo::Bibliografia { todas } => {
+                    let titulo = if depois_de_titulo { "" } else { self.rotulo_referencias.as_str() };
+                    let mut paragrafos = self.paragrafos_da_bibliografia(*todas, b.latex.strip_prefix("keyword="));
+                    for t in paragrafos.iter_mut().flat_map(|p| &mut p.texto) {
+                        t.estilo |= serifa;
+                    }
+                    Arc::new(lista_gerada(titulo, secao.as_ref(), &paragrafos, limite))
+                }
+                Conteudo::IndiceRemissivo => Arc::new(lista_gerada(&self.rotulo_indice, secao.as_ref(), &self.paragrafos_do_indice(), limite)),
                 c => {
-                    let estilo = self.doc.estilos.do_bloco(b);
-                    let assinatura: Assinatura = (numero.clone(), estilo.cloned());
+                    let do_latex = match c { Conteudo::Titulo { nivel, .. } if !b.latex.is_empty() => Estilo::do_latex(*nivel, &b.latex), _ => None };
+                    let estilo = self.doc.estilos.do_bloco(b).or(do_latex.as_ref());
+                    // O item com rótulo de texto se compõe pelo rótulo (a largura dele empurra o texto).
+                    let rotulo = matches!(c, Conteudo::Item { .. }).then(|| b.latex.split_once('|')).flatten().and(marcas[i].clone());
+                    let assinatura: Assinatura = (rotulo.clone().or_else(|| numero.clone()), estilo.cloned());
                     match self.cache.get(&b.id) {
                         Some((a, lay)) if *a == assinatura => Arc::clone(lay),
                         antigo => {
                             if antigo.is_some() {
                                 self.recompostos.push(b.id);
                             }
-                            let lay = Arc::new(crate::layout::compor_em_mesclada(
-                                c, &b.atrib, limite,
-                                &Entorno { numero: numero.as_deref(), estilo },
-                                &b.mesclagens,
-                            ));
+                            let lay = Arc::new(match c {
+                                Conteudo::Tabela { linhas, .. } if !b.latex.is_empty() => {
+                                    let mut t = crate::layout::tabela_latex(linhas, &b.latex, limite, &b.mesclagens, &b.atrib);
+                                    // Como no LaTeX, a tabela que cabe numa página não se parte; a maior quebra linha a linha.
+                                    let cfg = self.doc.pagina;
+                                    if t.linhas.iter().map(|l| l.altura).sum::<f32>() <= cfg.altura - cfg.margem_sup - cfg.margem_inf {
+                                        t.minimo_antes = t.linhas.len();
+                                    }
+                                    t
+                                }
+                                Conteudo::Item { nivel, texto, .. } if rotulo.is_some() => {
+                                    let negrito = if b.latex.starts_with('b') { crate::modelo::NEGRITO } else { 0 };
+                                    let a_direita = b.latex.split_once('|').is_some_and(|(e, _)| e.contains('d'));
+                                    crate::layout::item_com_rotulo(*nivel, texto, limite, &b.atrib, rotulo.as_deref().unwrap_or(""), negrito, a_direita)
+                                }
+                                // O espaço de dentro da caixa (`topo=9`, ver `caixa_de_blocos` do leitor do LaTeX).
+                                Conteudo::Paragrafo { .. } if b.latex.starts_with("topo=") => {
+                                    let mut l = crate::layout::compor_em_mesclada(c, &b.atrib, limite, &Entorno { numero: numero.as_deref(), estilo }, &b.mesclagens);
+                                    crate::layout::acolchoar_em_cima(&mut l, b.latex[5..].parse().unwrap_or(0.0));
+                                    l
+                                }
+                                Conteudo::Codigo { linguagem, codigo } if !b.latex.is_empty() => crate::layout::codigo_latex(linguagem, codigo, &b.latex, limite, &b.atrib),
+                                // O `quote` do LaTeX: texto normal, recuado dos dois lados (o `b.latex` diz quanto).
+                                Conteudo::Citacao { texto } if !b.latex.is_empty() => {
+                                    let recuo = b.latex.parse::<f32>().unwrap_or(25.0);
+                                    let a = Atrib { recuo_esq: b.atrib.recuo_esq + recuo, recuo_dir: b.atrib.recuo_dir + recuo, ..b.atrib.clone() };
+                                    crate::layout::compor_em(&Conteudo::Paragrafo { texto: texto.clone() }, &a, limite, &Entorno { numero: None, estilo: None })
+                                }
+                                _ => crate::layout::compor_em_mesclada(c, &b.atrib, limite, &Entorno { numero: numero.as_deref(), estilo }, &b.mesclagens),
+                            });
                             self.cache.insert(b.id, (assinatura, Arc::clone(&lay)));
                             lay
                         }
                     }
                 }
             };
+            // A legenda de figura em cima da imagem (ABNT) não fica no pé da página sem ela.
+            let imagem_depois = matches!(self.doc.blocos.get(i + 1).map(|p| &p.conteudo), Some(Conteudo::Imagem { .. }));
+            // E a imagem não fica no pé da página sem a legenda dela embaixo.
+            let legenda_depois = self.doc.blocos.get(i + 1).is_some_and(|p| p.atrib.legenda == 1 && matches!(p.conteudo, Conteudo::Paragrafo { .. }));
+            let junto = (b.atrib.legenda == 1 && imagem_depois) || (matches!(b.conteudo, Conteudo::Imagem { .. }) && legenda_depois);
+            let lay = if junto && !lay.manter_com_proximo {
+                Arc::new(crate::layout::LayoutBloco { manter_com_proximo: true, ..(*lay).clone() })
+            } else {
+                lay
+            };
             layouts.push(lay);
         }
-        let marcas = marcadores(&self.doc.blocos);
         self.paginas = paginar(&layouts, &marcas, self.doc.pagina.altura_util());
         alinhar_na_vertical(&mut self.paginas, self.doc.pagina.altura_util(), self.doc.extras.vertical);
         self.layouts = layouts;
@@ -325,7 +379,7 @@ impl Sessao {
     }
 
     /// Os títulos, com o número na frente quando a numeração está ligada.
-    fn entradas_do_sumario(&self) -> Vec<EntradaSumario> {
+    pub(crate) fn entradas_do_sumario(&self) -> Vec<EntradaSumario> {
         self.doc
             .blocos
             .iter()
@@ -352,6 +406,11 @@ impl Sessao {
             .map(|(i, b)| {
                 let texto = trechos_de(&b.conteudo).map(|t| texto_puro(t)).unwrap_or_default();
                 let numero = self.numeros.get(i).cloned().flatten().unwrap_or_default();
+                // A legenda do LaTeX entra como no `\listoffigures`: só o número numa coluna ("1  Título").
+                if !b.latex.is_empty() {
+                    let n = numero.trim().trim_end_matches([':', '.', '–']).trim().rsplit(' ').next().unwrap_or("").to_string();
+                    return EntradaSumario { id: b.id, nivel: 0, texto: format!("{n}  {texto}").trim().to_string() };
+                }
                 EntradaSumario { id: b.id, nivel: 0, texto: format!("{numero} {texto}").trim().to_string() }
             })
             .collect()

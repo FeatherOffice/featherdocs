@@ -78,6 +78,9 @@ pub enum Marca {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         fim: bool,
     },
+    /// Imagem no meio da linha (um ícone, um logo), apoiada na linha de base, com o tamanho em pontos;
+    /// `origem` como a do bloco de imagem.
+    Imagem { origem: String, largura: f32, altura: f32 },
 }
 
 /// Uma alteração sugerida (controle de alterações): texto inserido ou apagado, por quem e quando.
@@ -181,9 +184,17 @@ pub enum Conteudo {
         /// 0 = sumário (títulos); 1, 2 = lista de figuras, de tabelas (as legendas desse tipo).
         #[serde(default, skip_serializing_if = "zero")]
         lista: u8,
+        /// Como o `\tableofcontents` do LaTeX: fonte com serifa, seção em negrito sem pontilhado e
+        /// com espaço antes, o número numa coluna e o título alinhado depois dele.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        latex: bool,
     },
     Regua,
     QuebraDePagina,
+    /// Quebra de coluna: o texto segue na coluna seguinte; com uma coluna só, na página seguinte (como no Word).
+    QuebraDeColuna,
+    /// Quebra de seção (Layout → Quebras): onde a seção seguinte começa.
+    QuebraDeSecao { inicio: InicioDeSecao },
     /// Referências (bibliografia) geradas das fontes citadas no estilo do documento; `todas` = também as não citadas.
     Bibliografia {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -196,7 +207,7 @@ pub enum Conteudo {
 impl Conteudo {
     /// Um sumário até o nível `niveis`, com números de página e pontilhado.
     pub fn sumario(niveis: u8) -> Self {
-        Self::Sumario { niveis, sem_numeros: false, sem_pontilhado: false, lista: 0 }
+        Self::Sumario { niveis, sem_numeros: false, sem_pontilhado: false, lista: 0, latex: false }
     }
 
     /// Todos os textos com formatação do bloco: o texto corrido, cada célula, a legenda da imagem.
@@ -219,6 +230,23 @@ impl Conteudo {
         }
     }
 }
+
+/// Onde começa a seção depois de uma quebra de seção.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InicioDeSecao {
+    #[default]
+    ProximaPagina,
+    /// Na mesma página.
+    Continua,
+    /// Na próxima página de número par (uma página em branco entra no meio, se preciso).
+    PaginaPar,
+    PaginaImpar,
+}
+
+/// Quebra de linha dentro do parágrafo (Shift+Enter, Layout → Quebras → Disposição do texto).
+/// Não é `\n`, que divide parágrafos ao digitar ou colar.
+pub const QUEBRA_DE_LINHA: char = '\u{2028}';
 
 /// Alinhamento horizontal do texto de um parágrafo.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -248,6 +276,8 @@ pub enum Lista {
     Alfabetica,
     /// I. II. III.
     Romana,
+    /// i. ii. iii. (o `\roman*` do LaTeX, o `lowerRoman` do Word)
+    RomanaMinuscula,
 }
 
 /// Passo de recuo (1,25 cm) em pontos.
@@ -303,6 +333,12 @@ pub struct Atrib {
     /// Cor do marcador do item de lista `0xRRGGBBAA`; 0 = a do texto.
     #[serde(default)]
     pub cor_marcador: u32,
+    /// Título onde começam os apêndices (`\appendix`): daqui em diante o nível 1 recomeça em letras (A, B…).
+    #[serde(default)]
+    pub apendice: bool,
+    /// Espaço elástico antes do bloco (o `\vfill` do LaTeX): o que sobra na página se reparte entre eles.
+    #[serde(default)]
+    pub encher: bool,
 }
 
 impl Atrib {
@@ -341,12 +377,19 @@ pub struct Bloco {
     /// modelo textual nem os campos serializados dos tipos de conteúdo.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mesclagens: Vec<MesclagemTabela>,
+    /// O que o bloco guarda do código LaTeX de onde veio. Legenda: o separador depois do número
+    /// (`:` nas classes padrão, `.`), no lugar do " –" do FeatherDocs. Tabela de um `tabular`: as colunas como no código (`@{}llrr@{}`, `|l|c|`) e,
+    /// depois de uma quebra de linha, os fios de cada divisa entre linhas separados por `;` (da de
+    /// cima da primeira linha à de baixo da última): `T` `\toprule`, `M` `\midrule`, `B` `\bottomrule`,
+    /// `H` `\hline`, `C2-3` `\cline{2-3}`, `c2-3` `\cmidrule{2-3}`, separados por `,`. Vazio = tabela do FeatherDocs.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub latex: String,
 }
 
 impl Bloco {
     /// Um bloco com os atributos de parágrafo padrão.
     pub fn novo(id: u64, conteudo: Conteudo) -> Self {
-        Self { id, conteudo, atrib: Atrib::default(), mesclagens: Vec::new() }
+        Self { id, conteudo, atrib: Atrib::default(), mesclagens: Vec::new(), latex: String::new() }
     }
 }
 
@@ -405,11 +448,29 @@ pub struct Faixas {
     pub centro: String,
     #[serde(default)]
     pub direita: String,
+    /// Fio entre a faixa e o texto (o `\headrulewidth`/`\footrulewidth`), em pt; 0 = sem fio.
+    #[serde(default)]
+    pub fio: f32,
+    /// A letra da faixa: bits de estilo (`SERIFA`…), tamanho em pt (0 = 9) e cor (0 = o cinza de sempre).
+    #[serde(default)]
+    pub estilo: u8,
+    #[serde(default)]
+    pub tamanho: f32,
+    #[serde(default)]
+    pub cor: u32,
+    /// Uma imagem no meio da faixa (o logo do `\fancyhead[C]{\includegraphics…}`): `data:` URL ou o
+    /// nome do arquivo, e a largura e a altura em pt.
+    #[serde(default)]
+    pub imagem: String,
+    #[serde(default)]
+    pub imagem_largura: f32,
+    #[serde(default)]
+    pub imagem_altura: f32,
 }
 
 impl Faixas {
     pub fn vazia(&self) -> bool {
-        self.esquerda.is_empty() && self.centro.is_empty() && self.direita.is_empty()
+        self.esquerda.is_empty() && self.centro.is_empty() && self.direita.is_empty() && self.imagem.is_empty()
     }
 }
 
@@ -424,9 +485,14 @@ pub struct Extras {
     pub cabecalho: Faixas,
     #[serde(default = "rodape_padrao")]
     pub rodape: Faixas,
-    /// Sem cabeçalho e rodapé na primeira página (a capa).
+    /// A primeira página com o cabeçalho e o rodapé dela (`cabecalho_primeira`/`rodape_primeira`;
+    /// vazios = a capa sem nada).
     #[serde(default)]
     pub primeira_diferente: bool,
+    #[serde(default)]
+    pub cabecalho_primeira: Faixas,
+    #[serde(default)]
+    pub rodape_primeira: Faixas,
     /// Cor do papel `0xRRGGBBAA`; 0 = branco.
     #[serde(default)]
     pub cor_pagina: u32,
@@ -459,6 +525,10 @@ pub struct Extras {
     /// Documento protegido (Revisão → Proteger): só leitura e comentários até desproteger.
     #[serde(default)]
     pub protegido: bool,
+    /// Veio do LaTeX: o texto justificado quebra como o TeX (o parágrafo inteiro de uma vez, com o
+    /// espaço maior depois do ponto). O de outra origem quebra linha a linha, como o Word.
+    #[serde(default)]
+    pub composicao_tex: bool,
 }
 
 fn dois() -> u8 {
@@ -489,7 +559,7 @@ pub enum NumeracaoDeLinhas {
 
 impl Default for Extras {
     fn default() -> Self {
-        Self { cabecalho: Faixas::default(), rodape: rodape_padrao(), primeira_diferente: false, cor_pagina: 0, marca: String::new(), marca_cor: 0, borda_cor: 0, borda_espessura: 0.0, borda_distancia: 0.0, vertical: Vertical::Topo, numerar_linhas: NumeracaoDeLinhas::Nenhuma, formato_notas: 0, formato_notas_fim: 2, controlar_alteracoes: false, protegido: false }
+        Self { cabecalho: Faixas::default(), rodape: rodape_padrao(), primeira_diferente: false, cabecalho_primeira: Faixas::default(), rodape_primeira: Faixas::default(), cor_pagina: 0, marca: String::new(), marca_cor: 0, borda_cor: 0, borda_espessura: 0.0, borda_distancia: 0.0, vertical: Vertical::Topo, numerar_linhas: NumeracaoDeLinhas::Nenhuma, formato_notas: 0, formato_notas_fim: 2, controlar_alteracoes: false, protegido: false, composicao_tex: false }
     }
 }
 
@@ -532,6 +602,26 @@ pub struct Estilo {
     /// 0 = a padrão.
     #[serde(default)]
     pub entrelinha: f32,
+}
+
+impl Estilo {
+    /// A letra do título vindo do LaTeX, guardada em `Bloco.latex` como "corpo bits cor antes depois"
+    /// (a classe e o `\titleformat` decidem; não é um estilo com nome do usuário).
+    pub fn do_latex(nivel: u8, latex: &str) -> Option<Estilo> {
+        let [tamanho, bits, cor, antes, depois] = latex.split(' ').collect::<Vec<_>>()[..] else { return None };
+        Some(Estilo {
+            id: 0,
+            nome: String::new(),
+            base: nivel,
+            bits: bits.parse().ok()?,
+            tamanho: tamanho.parse().ok()?,
+            cor: u32::from_str_radix(cor, 16).ok()?,
+            alinhamento: Alinhamento::default(),
+            antes: antes.parse().ok(),
+            depois: depois.parse().ok(),
+            entrelinha: 0.0,
+        })
+    }
 }
 
 /// Os estilos com nome e a numeração dos títulos.
@@ -652,6 +742,12 @@ pub struct Fonte {
     pub acesso: String,
     #[serde(default)]
     pub doi: String,
+    /// As palavras-chave (o `keywords` do BibTeX), separadas por vírgula: a lista filtrada as escolhe.
+    #[serde(default)]
+    pub palavras: String,
+    /// O `note` do BibTeX: sai como está, depois do ano.
+    #[serde(default)]
+    pub nota: String,
 }
 
 /// O estilo das citações e das referências.
@@ -674,6 +770,9 @@ pub struct Bibliografia {
     pub estilo: EstiloDeCitacao,
     #[serde(default)]
     pub fontes: Vec<Fonte>,
+    /// Sem "[S. l.]" e "[s. n.]" quando falta o local ou a editora (a opção `noslsn` do biblatex-abnt).
+    #[serde(default)]
+    pub sem_sl_sn: bool,
 }
 
 /// Um marcador: o nome e o bloco para onde ele aponta.

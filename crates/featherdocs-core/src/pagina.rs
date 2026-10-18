@@ -38,7 +38,7 @@ fn tem_numero(t: &str) -> bool {
 
 impl Sessao {
     /// Muda o que vale para a página toda e repinta (não é bloco: fica fora do desfazer, como o papel).
-    fn mudar_extras(&mut self, f: impl FnOnce(&mut Extras)) -> Mudanca {
+    pub fn mudar_extras(&mut self, f: impl FnOnce(&mut Extras)) -> Mudanca {
         let antes = self.doc.extras.clone();
         f(&mut self.doc.extras);
         if antes == self.doc.extras {
@@ -49,13 +49,15 @@ impl Sessao {
 
     /// O cabeçalho: texto da esquerda, do centro e da direita (com os campos `{pagina}`, `{total}`…).
     pub fn cabecalho_definir(&mut self, esquerda: &str, centro: &str, direita: &str) -> Mudanca {
-        let novo = Faixas { esquerda: esquerda.to_string(), centro: centro.to_string(), direita: direita.to_string() };
+        // O texto muda; o fio e a letra ficam.
+        let novo = Faixas { esquerda: esquerda.to_string(), centro: centro.to_string(), direita: direita.to_string(), ..self.doc.extras.cabecalho.clone() };
         self.mudar_extras(|x| x.cabecalho = novo)
     }
 
     /// O rodapé, como o cabeçalho.
     pub fn rodape_definir(&mut self, esquerda: &str, centro: &str, direita: &str) -> Mudanca {
-        let novo = Faixas { esquerda: esquerda.to_string(), centro: centro.to_string(), direita: direita.to_string() };
+        // O texto muda; o fio e a letra ficam.
+        let novo = Faixas { esquerda: esquerda.to_string(), centro: centro.to_string(), direita: direita.to_string(), ..self.doc.extras.rodape.clone() };
         self.mudar_extras(|x| x.rodape = novo)
     }
 

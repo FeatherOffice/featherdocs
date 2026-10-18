@@ -1,6 +1,7 @@
 //! Diálogos internos de formulário curto (link, nota, comentário, cabeçalho, margens…).
 //! Cada tipo diz os campos, de onde vem o valor inicial e qual chamada do motor aplica.
 use crate::app::Msg;
+use crate::localidade::{tr, trf};
 use featherdocs_core::sessao::Sessao;
 use feather_ui::dialogo::{self as dlg, Dialogo};
 use feather_ui::tema::{estilo_botao_pequeno, COR_TEXTO_MUTED};
@@ -33,6 +34,8 @@ pub enum Tipo {
     NovoEstilo,
     /// Resposta ao comentário `id`.
     Resposta(u64),
+    /// Aplicar estilos: campo 0 = o nome do estilo (a lista embaixo filtra por ele).
+    AplicarEstilo,
 }
 
 pub struct Formulario {
@@ -46,6 +49,71 @@ const ROTULOS_FONTE: [&str; 14] = [
     "Chave (como silva2023)", "Tipo", "Autores", "Título", "Ano", "Edição", "Local", "Editora",
     "Periódico, livro ou programa", "Volume", "Número", "Páginas", "Endereço (URL)", "Acesso em",
 ];
+
+/// Um estilo rápido do Word que o motor representa como estilo com nome de parágrafo; ele só entra
+/// no documento (com o nome no idioma da interface) na primeira vez que é usado.
+pub struct Rapido {
+    pub nome: &'static str,
+    /// O corpo da amostra na galeria.
+    pub amostra: f32,
+    pub italico: bool,
+    tamanho: f32,
+    pub cor: u32,
+    centro: bool,
+    antes: Option<f32>,
+    depois: Option<f32>,
+    entrelinha: f32,
+}
+
+// shortcut: os estilos de caractere do Word (Ênfase, Forte, Referência…) não entram: o motor só tem estilo de parágrafo.
+pub const RAPIDOS: [Rapido; 4] = [
+    Rapido { nome: "Sem espaçamento", amostra: 13., italico: false, tamanho: 0., cor: 0, centro: false, antes: Some(0.), depois: Some(0.), entrelinha: 1.0 },
+    Rapido { nome: "Título", amostra: 18., italico: false, tamanho: 28., cor: 0, centro: false, antes: Some(0.), depois: Some(6.), entrelinha: 0. },
+    Rapido { nome: "Subtítulo", amostra: 14., italico: false, tamanho: 15., cor: 0x595959FF, centro: false, antes: None, depois: Some(8.), entrelinha: 0. },
+    Rapido { nome: "Citação intensa", amostra: 13., italico: true, tamanho: 0., cor: 0x2F5496FF, centro: true, antes: Some(18.), depois: Some(18.), entrelinha: 0. },
+];
+
+/// O rápido cujo nome (em qualquer um dos três idiomas) é `nome`.
+pub fn rapido_de_nome(nome: &str) -> Option<usize> {
+    let n = nome.trim().to_lowercase();
+    RAPIDOS.iter().position(|r| crate::localidade::IDIOMAS.iter().any(|(codigo, _)| crate::localidade::tr_em(codigo, r.nome).to_lowercase() == n))
+}
+
+/// Aplica o rápido `k` à seleção: cria o estilo com nome na primeira vez, depois só aplica.
+pub fn aplicar_rapido(s: &mut Sessao, k: usize) -> Result<(), String> {
+    use featherdocs_core::modelo::{Alinhamento, Estilo, ITALICO};
+    let r = RAPIDOS.get(k).ok_or(tr("Estilo desconhecido."))?;
+    if let Some(e) = s.documento().estilos.lista.iter().find(|e| rapido_de_nome(&e.nome) == Some(k)) {
+        let id = e.id;
+        return s.estilo_aplicar(id).map(|_| ());
+    }
+    let e = Estilo {
+        id: 0,
+        nome: tr(r.nome).to_string(),
+        base: 0,
+        bits: if r.italico { ITALICO } else { 0 },
+        tamanho: r.tamanho,
+        cor: r.cor,
+        alinhamento: if r.centro { Alinhamento::Centro } else { Alinhamento::Esquerda },
+        antes: r.antes,
+        depois: r.depois,
+        entrelinha: r.entrelinha,
+    };
+    s.estilo_criar(e).map(|_| ())
+}
+
+/// Todos os estilos que Aplicar estilos oferece: (nome mostrado, o que aplicar).
+pub enum Aplicavel {
+    Fabrica(&'static str),
+    Rapido(usize),
+    Nomeado(u32),
+}
+pub fn estilos_aplicaveis(s: &Sessao) -> Vec<(String, Aplicavel)> {
+    let mut v: Vec<(String, Aplicavel)> = crate::faixa::DE_FABRICA.iter().map(|(id, nome, ..)| (crate::localidade::tr(nome).to_string(), Aplicavel::Fabrica(id))).collect();
+    v.extend(RAPIDOS.iter().enumerate().map(|(k, r)| (crate::localidade::tr(r.nome).to_string(), Aplicavel::Rapido(k))));
+    v.extend(s.documento().estilos.lista.iter().filter(|e| rapido_de_nome(&e.nome).is_none()).map(|e| (e.nome.clone(), Aplicavel::Nomeado(e.id))));
+    v
+}
 
 /// Um estilo com nome que guarda a formatação do parágrafo onde está o cursor.
 pub fn estilo_do_cursor(s: &Sessao, nome: &str) -> featherdocs_core::modelo::Estilo {
@@ -78,15 +146,15 @@ pub fn estilo_do_cursor(s: &Sessao, nome: &str) -> featherdocs_core::modelo::Est
 /// Monta a fonte a partir dos campos do diálogo (a ordem de `ROTULOS_FONTE`).
 fn fonte_dos_campos(c: &[String]) -> Result<featherdocs_core::modelo::Fonte, String> {
     use featherdocs_core::modelo::{Autor, Fonte, TipoDeFonte};
-    let tipo = match c[1].trim().to_lowercase().as_str() {
-        "" | "livro" => TipoDeFonte::Livro,
-        "capítulo" | "capitulo" => TipoDeFonte::Capitulo,
-        "artigo" => TipoDeFonte::Artigo,
-        "site" => TipoDeFonte::Site,
-        "tese" => TipoDeFonte::Tese,
-        "relatório" | "relatorio" => TipoDeFonte::Relatorio,
-        "outro" => TipoDeFonte::Outro,
-        t => return Err(format!("Tipo de fonte desconhecido: \"{t}\".")),
+    // O tipo vale escrito em português ou no idioma da interface.
+    let escrito = c[1].trim().to_lowercase();
+    let tipos = [("livro", TipoDeFonte::Livro), ("capítulo", TipoDeFonte::Capitulo), ("capitulo", TipoDeFonte::Capitulo), ("artigo", TipoDeFonte::Artigo),
+        ("site", TipoDeFonte::Site), ("tese", TipoDeFonte::Tese), ("relatório", TipoDeFonte::Relatorio), ("relatorio", TipoDeFonte::Relatorio), ("outro", TipoDeFonte::Outro)];
+    let tipo = if escrito.is_empty() {
+        TipoDeFonte::Livro
+    } else {
+        tipos.iter().find(|(pt, _)| *pt == escrito || tr(pt).to_lowercase() == escrito).map(|(_, t)| *t)
+            .ok_or_else(|| trf("Tipo de fonte desconhecido: \"{}\".", &[&escrito]))?
     };
     let autores = c[2].split(';').map(str::trim).filter(|a| !a.is_empty()).map(|a| {
         let (sobrenome, nome) = a.split_once(',').unwrap_or((a, ""));
@@ -104,7 +172,7 @@ fn cm(pt: f32) -> String {
     format!("{:.2}", pt / CM).replace('.', ",")
 }
 fn numero(s: &str, rotulo: &str) -> Result<f32, String> {
-    s.trim().replace(',', ".").parse::<f32>().map_err(|_| format!("{rotulo}: número inválido."))
+    s.trim().replace(',', ".").parse::<f32>().map_err(|_| trf("{}: número inválido.", &[&tr(rotulo)]))
 }
 
 impl Tipo {
@@ -130,6 +198,7 @@ impl Tipo {
             Self::NovoEstilo => "Novo estilo",
             Self::EditarNota(_, fim) => if fim { "Editar nota de fim" } else { "Editar nota de rodapé" },
             Self::Resposta(_) => "Responder comentário",
+            Self::AplicarEstilo => "Aplicar estilos",
         }
     }
     fn icone(self) -> &'static str {
@@ -161,7 +230,7 @@ impl Tipo {
             Self::Tabela => &["Linhas", "Colunas"],
             Self::NovaFonte => &ROTULOS_FONTE,
             Self::Citacao => &[],
-            Self::NovoEstilo => &["Nome do estilo"],
+            Self::NovoEstilo | Self::AplicarEstilo => &["Nome do estilo"],
         }
     }
     fn explicacao(self) -> Option<&'static str> {
@@ -172,6 +241,7 @@ impl Tipo {
             Self::NovaFonte => Some("Autores: \"Sobrenome, Nome; Sobrenome, Nome\". Tipo: livro, capítulo, artigo, site, tese, relatório ou outro."),
             Self::Citacao => Some("Marque uma ou mais fontes; a página é opcional."),
             Self::NovoEstilo => Some("Guarda a formatação do parágrafo do cursor e a aplica à seleção."),
+            Self::AplicarEstilo => Some("Digite o nome ou escolha na lista; OK aplica aos parágrafos da seleção."),
             _ => None,
         }
     }
@@ -219,7 +289,7 @@ impl Formulario {
             Tipo::Marcador => s.marcador_adicionar(c[0].trim()).map(|_| ()),
             Tipo::IndiceEntrada => {
                 let (_, n) = s.indice_marcar(c[0].trim(), c[1].trim(), false)?;
-                return Ok(format!("{n} entrada(s) do índice marcada(s)"));
+                return Ok(trf("{} entrada(s) do índice marcada(s)", &[&n]));
             }
             Tipo::Referencia => Ok(()),
             Tipo::Margens => {
@@ -239,18 +309,28 @@ impl Formulario {
                 s.citacao_inserir(&chaves, c[1].trim()).map(|_| ())
             }
             Tipo::Tabela => {
-                let n = |x: &str, r: &str| x.trim().parse::<usize>().map_err(|_| format!("{r}: use um número inteiro."));
+                let n = |x: &str, r: &str| x.trim().parse::<usize>().map_err(|_| trf("{}: use um número inteiro.", &[&tr(r)]));
                 s.inserir_tabela(n(&c[0], "Linhas")?, n(&c[1], "Colunas")?).map(|_| ())
             }
             Tipo::Resposta(id) => s.comentario_mudar(id, None, Some(c[0].trim()), None).map(|_| ()),
+            Tipo::AplicarEstilo => {
+                let alvo = c[0].trim().to_lowercase();
+                let achado = estilos_aplicaveis(s).into_iter().find(|(nome, _)| nome.to_lowercase() == alvo).map(|(_, a)| a);
+                match achado {
+                    Some(Aplicavel::Fabrica(id)) => { s.paragrafo_estilo(id); Ok(()) }
+                    Some(Aplicavel::Rapido(k)) => aplicar_rapido(s, k),
+                    Some(Aplicavel::Nomeado(id)) => s.estilo_aplicar(id).map(|_| ()),
+                    None => Err(trf("Não há estilo chamado \"{}\".", &[&c[0].trim()])),
+                }
+            }
         }?;
-        Ok(format!("{} aplicado", self.tipo.titulo()))
+        Ok(trf("{} aplicado", &[&tr(self.tipo.titulo())]))
     }
 
     pub fn view<'a>(&'a self, s: &'a Sessao, base: Element<'a, Msg>) -> Element<'a, Msg> {
         let mut corpo = column![].spacing(10);
         if let Some(e) = self.tipo.explicacao() {
-            corpo = corpo.push(text(e).size(12).color(COR_TEXTO_MUTED()));
+            corpo = corpo.push(text(tr(e)).size(12).color(COR_TEXTO_MUTED()));
         }
         for (i, rotulo) in self.tipo.rotulos().iter().enumerate() {
             let mut campo = text_input("", &self.campos[i])
@@ -261,7 +341,7 @@ impl Formulario {
             if i == 0 {
                 campo = campo.id(text_input::Id::new("form0"));
             }
-            corpo = corpo.push(column![text(*rotulo).size(12), campo].spacing(4));
+            corpo = corpo.push(column![text(tr(rotulo)).size(12), campo].spacing(4));
         }
         if self.tipo == Tipo::Referencia {
             corpo = corpo.push(self.view_referencia(s));
@@ -269,16 +349,25 @@ impl Formulario {
         if self.tipo == Tipo::Citacao {
             corpo = corpo.push(self.view_citacao(s));
         }
-        let mut d = Dialogo::new(self.tipo.titulo(), corpo)
+        if self.tipo == Tipo::AplicarEstilo {
+            let filtro = self.campos[0].trim().to_lowercase();
+            let lista = column(estilos_aplicaveis(s).into_iter().filter(|(nome, _)| nome.to_lowercase().contains(&filtro)).map(|(nome, _)| {
+                button(text(nome.clone()).size(12)).width(Length::Fill).padding([5, 8])
+                    .style(estilo_botao_pequeno(nome.to_lowercase() == filtro))
+                    .on_press(Msg::FormCampo(0, nome)).into()
+            })).spacing(2);
+            corpo = corpo.push(dlg::rolagem(lista));
+        }
+        let mut d = Dialogo::new(tr(self.tipo.titulo()), corpo)
             .icone(self.tipo.icone())
             .ao_fechar(Msg::FormFechar)
             .topo(170.0)
-            .secundario("Cancelar", Some(Msg::FormFechar));
+            .secundario(tr("Cancelar"), Some(Msg::FormFechar));
         if self.tipo != Tipo::Referencia {
             d = d.primario("OK", Some(Msg::FormOk));
         }
         if self.tipo == Tipo::Link && s.link_no_cursor().is_some() {
-            d = d.rodape_esquerda(dlg::botao_secundario("Remover link", Some(Msg::FormRemoverLink)));
+            d = d.rodape_esquerda(dlg::botao_secundario(tr("Remover link"), Some(Msg::FormRemoverLink)));
         }
         d.sobre(base)
     }
@@ -286,7 +375,7 @@ impl Formulario {
     fn view_citacao<'a>(&'a self, s: &'a Sessao) -> Element<'a, Msg> {
         let fontes = &s.documento().bibliografia.fontes;
         if fontes.is_empty() {
-            return dlg::aviso_vazio("Nenhuma fonte no documento: use Nova fonte ou Importar .bib.");
+            return dlg::aviso_vazio(tr("Nenhuma fonte no documento: use Nova fonte ou Importar .bib."));
         }
         let marcadas: Vec<&str> = self.campos[0].split(',').filter(|k| !k.is_empty()).collect();
         let lista = column(fontes.iter().map(|f| {
@@ -305,7 +394,7 @@ impl Formulario {
         })).spacing(2);
         column![
             dlg::rolagem(lista),
-            column![text("Página citada (opcional)").size(12),
+            column![text(tr("Página citada (opcional)")).size(12),
                 text_input("", &self.campos[1]).on_input(|v| Msg::FormCampo(1, v)).on_submit(Msg::FormOk).padding([6, 8]).size(13)]
                 .spacing(4),
         ]
@@ -316,12 +405,12 @@ impl Formulario {
     fn view_referencia<'a>(&'a self, s: &'a Sessao) -> Element<'a, Msg> {
         let modo = self.campos[0].as_str();
         let modos = row(["texto", "numero", "pagina"].into_iter().zip(["Texto", "Número", "Página"]).map(|(m, r)| {
-            button(text(r).size(12)).padding([4, 10]).style(estilo_botao_pequeno(modo == m))
+            button(text(tr(r)).size(12)).padding([4, 10]).style(estilo_botao_pequeno(modo == m))
                 .on_press(Msg::FormCampo(0, m.into())).into()
         })).spacing(4);
         let alvos = s.alvos_de_referencia();
         if alvos.is_empty() {
-            return column![modos, dlg::aviso_vazio("Nenhum título, legenda ou marcador no documento.")].spacing(10).into();
+            return column![modos, dlg::aviso_vazio(tr("Nenhum título, legenda ou marcador no documento."))].spacing(10).into();
         }
         let lista = column(alvos.into_iter().map(|a| {
             let rotulo = format!("{}  {} {}  · p. {}", a.tipo, a.numero, a.texto, a.pagina);

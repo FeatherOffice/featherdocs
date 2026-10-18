@@ -1073,7 +1073,7 @@ fn primos(sup: Option<&[No]>) -> bool {
 /// Comandos de texto comuns dentro de `\text{}` (acentos, espaços).
 fn texto_de_comandos(t: &str) -> String {
     let mut s = t.replace("\\ ", " ").replace('~', "\u{a0}").replace("\\,", "\u{2009}").replace("\\quad", "\u{2003}").replace("\\qquad", "\u{2003}\u{2003}");
-    for (de, para) in [("\\'a", "á"), ("\\'e", "é"), ("\\'i", "í"), ("\\'o", "ó"), ("\\'u", "ú"), ("\\~a", "ã"), ("\\~o", "õ"), ("\\^a", "â"), ("\\^e", "ê"), ("\\^o", "ô"), ("\\c{c}", "ç"), ("\\c c", "ç"), ("\\`a", "à"), ("--", "–")] {
+    for (de, para) in [("\\'a", "á"), ("\\'e", "é"), ("\\'i", "í"), ("\\'o", "ó"), ("\\'u", "ú"), ("\\~a", "ã"), ("\\~o", "õ"), ("\\^a", "â"), ("\\^e", "ê"), ("\\^o", "ô"), ("\\c{c}", "ç"), ("\\c c", "ç"), ("\\`a", "à"), ("--", "–"), ("\\%", "%"), ("\\&", "&"), ("\\_", "_"), ("\\#", "#")] {
         s = s.replace(de, para);
     }
     s.replace(['{', '}'], "")
@@ -1297,6 +1297,12 @@ mod testes {
         assert!(l[0].sup.is_some());
         assert_eq!(l[1].classe, Classe::Bin);
         assert!(matches!(l[2].nucleo, Nucleo::Cor(COR_ERRO, _)));
+    }
+
+    #[test]
+    fn escapes_dentro_do_text() {
+        let d = format!("{:?}", analisar("\\text{59,3\\% R\\& D}"));
+        assert!(d.contains("59,3% R& D") && !d.contains("\\\\%"), "{d}");
     }
 
     #[test]

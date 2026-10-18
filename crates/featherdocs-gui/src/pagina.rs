@@ -15,6 +15,8 @@ pub struct Pagina<'a> {
     pub escala: f32,
     pub ativa: bool,
     pub imagens: &'a HashMap<String, iced::widget::image::Handle>,
+    /// A seleção começou noutra página e o botão ainda está apertado.
+    pub arrastando: bool,
 }
 #[derive(Default)]
 pub struct Estado {
@@ -149,6 +151,17 @@ impl canvas::Program<Msg> for Pagina<'_> {
         use canvas::event::Status::{Captured, Ignored};
         match event {
             canvas::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => s.modificadores = m,
+            // Ctrl+roda: zoom; capturar impede que a rolagem da página ande junto.
+            canvas::Event::Mouse(mouse::Event::WheelScrolled { delta })
+                if s.modificadores.control() && cursor.is_over(bounds) =>
+            {
+                // Roda: 10% por dente; touchpad (pixels): proporcional, para não pular de 50% a 200%.
+                let passo = match delta {
+                    mouse::ScrollDelta::Lines { y, .. } => y.signum() * 0.1,
+                    mouse::ScrollDelta::Pixels { y, .. } => (y * 0.0025).clamp(-0.1, 0.1),
+                };
+                return (Captured, (passo != 0.).then(|| Msg::Comando(crate::app::Comando::Zoom(passo))));
+            }
             canvas::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)) => {
                 if let (Some(p), Some(abs)) = (cursor.position_in(bounds), cursor.position()) {
                     let q = ponto_da_pagina(p, self.escala);
@@ -186,7 +199,7 @@ impl canvas::Program<Msg> for Pagina<'_> {
                     );
                 }
             }
-            canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) if s.arrastando => {
+            canvas::Event::Mouse(mouse::Event::CursorMoved { .. }) if s.arrastando || self.arrastando => {
                 if let Some(p) = cursor.position_in(bounds) {
                     return (
                         Captured,
@@ -200,8 +213,9 @@ impl canvas::Program<Msg> for Pagina<'_> {
                     );
                 }
             }
-            canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                s.arrastando = false
+            canvas::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) if s.arrastando => {
+                s.arrastando = false;
+                return (Ignored, Some(Msg::Soltar));
             }
             canvas::Event::Keyboard(keyboard::Event::KeyPressed {
                 key,
@@ -211,7 +225,7 @@ impl canvas::Program<Msg> for Pagina<'_> {
             }) if self.ativa => {
                 // Atalhos de arquivo e clipboard ficam na subscription do aplicativo.
                 if modifiers.control()
-                    && matches!(&key, keyboard::Key::Character(c) if ["n", "o", "s", "c", "x", "v", "f"].contains(&c.to_lowercase().as_str()))
+                    && matches!(&key, keyboard::Key::Character(c) if ["n", "o", "s", "p", "c", "x", "v", "f"].contains(&c.to_lowercase().as_str()))
                 {
                     return (Ignored, None);
                 }
@@ -350,10 +364,26 @@ pub fn pixmap_svg(origem: &str) -> Option<resvg::tiny_skia::Pixmap> {
     }
     let mut opcoes = resvg::usvg::Options::default();
     opcoes.image_href_resolver.resolve_string = Box::new(|_, _| None);
+    // O texto do SVG (desenho do TikZ, rótulos do gráfico) usa as fontes que o programa já leva.
+    static FONTES: std::sync::OnceLock<std::sync::Arc<resvg::usvg::fontdb::Database>> = std::sync::OnceLock::new();
+    opcoes.fontdb = FONTES
+        .get_or_init(|| {
+            let mut db = resvg::usvg::fontdb::Database::new();
+            for f in crate::FONTES_DO_TEXTO {
+                db.load_font_data(f.to_vec());
+            }
+            db.set_serif_family("Liberation Serif");
+            db.set_sans_serif_family("Liberation Sans");
+            db.set_monospace_family("Liberation Mono");
+            std::sync::Arc::new(db)
+        })
+        .clone();
     let tree = resvg::usvg::Tree::from_data(&bytes, &opcoes).ok()?;
-    let size = tree.size().to_int_size();
+    // 4 pixels por ponto (o fio de 0,4 pt fica preto, não cinza), até 4096 px no lado maior.
+    let (w, h) = (tree.size().width(), tree.size().height());
+    let fator = (4096.0 / w.max(h).max(1.0)).min(4.0).max(1.0);
     let mut pixmap = resvg::tiny_skia::Pixmap::new(
-        size.width().min(4096), size.height().min(4096),
+        ((w * fator).ceil() as u32).clamp(1, 4096), ((h * fator).ceil() as u32).clamp(1, 4096),
     )?;
     let escala = (pixmap.width() as f32 / tree.size().width())
         .min(pixmap.height() as f32 / tree.size().height());

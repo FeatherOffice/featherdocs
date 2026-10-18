@@ -20,6 +20,12 @@ pub struct Configuracao {
     pub zoom: f32,
     /// Arquivos abertos ou salvos por último, o mais recente primeiro.
     pub recentes: Vec<PathBuf>,
+    /// Idioma da interface (`pt-BR`, `en-US`, `es-ES`); vazio = ainda não escolhido (segue o sistema).
+    pub idioma: String,
+    /// Números de linha à esquerda do painel de código: [LaTeX, Markdown].
+    pub numeros_de_linha: [bool; 2],
+    /// O tema do realce do código (`painel_codigo::TEMAS`): [LaTeX, Markdown].
+    pub tema_codigo: [usize; 2],
 }
 impl Default for Configuracao {
     fn default() -> Self {
@@ -33,6 +39,9 @@ impl Default for Configuracao {
             barra_propria: true,
             zoom: 1.0,
             recentes: Vec::new(),
+            idioma: String::new(),
+            numeros_de_linha: [true; 2],
+            tema_codigo: [0; 2],
         }
     }
 }
@@ -57,6 +66,8 @@ impl Configuracao {
         if !c.zoom.is_finite() { c.zoom = 1.0; }
         c.zoom = c.zoom.clamp(0.5, 2.0);
         c.acento = c.acento.min(feather_ui::tema::ACENTOS.len() - 1);
+        let sistema = if c.idioma.is_empty() { sys_locale::get_locale() } else { Some(c.idioma.clone()) };
+        c.idioma = crate::localidade::suportado(sistema.as_deref()).to_string();
         c
     }
     fn gravar_em(&self, path: &std::path::Path) -> std::io::Result<()> {
@@ -113,7 +124,8 @@ mod testes_ui010 {
         let conf = Configuracao {
             escuro: false, tema_auto: true, acento: 2, marca_personalizada: Some(true), estrutura: false,
             faixa_recolhida: true, barra_propria: false, zoom: 1.75,
-            recentes: vec![PathBuf::from("/tmp/a.fdoz")],
+            recentes: vec![PathBuf::from("/tmp/a.fdoz")], idioma: "es-ES".into(),
+            numeros_de_linha: [false, true], tema_codigo: [2, 1],
         };
         conf.gravar_em(&p).unwrap();
         let lida = Configuracao::carregar_de(&p);
@@ -122,6 +134,8 @@ mod testes_ui010 {
         assert_eq!(lida.acento, 2);
         assert!((lida.zoom - 1.75).abs() < 0.00001);
         assert_eq!(lida.recentes, conf.recentes);
+        assert_eq!(lida.idioma, "es-ES");
+        assert_eq!((lida.numeros_de_linha, lida.tema_codigo), ([false, true], [2, 1]));
         std::fs::remove_dir_all(p.parent().unwrap()).unwrap();
     }
 

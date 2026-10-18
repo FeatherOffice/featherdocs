@@ -5,7 +5,7 @@
 
 use crate::inline::texto_puro;
 use crate::medida::{largura, largura_do_caractere};
-use crate::modelo::{Alinhamento, Atrib, Celula, Conteudo, Estilo, Lista, Marca as Objeto, MesclagemTabela, Trecho, CODIGO, EXIBIDA, ITALICO, MATEMATICA, NEGRITO, SUBLINHADO};
+use crate::modelo::{Alinhamento, Atrib, Celula, Conteudo, Estilo, InicioDeSecao, Lista, Marca as Objeto, MesclagemTabela, Trecho, CODIGO, QUEBRA_DE_LINHA, EXIBIDA, ITALICO, MATEMATICA, NEGRITO, SERIFA, SUBLINHADO};
 
 pub const COR_TEXTO: u32 = 0x1a1a_1aff;
 pub const COR_LINK: u32 = 0x1a56_c4ff;
@@ -105,7 +105,7 @@ pub struct Linha {
     pub deco: Vec<Deco>,
     /// Entrada de sumário: o título para onde ela aponta (o número da página sai no quadro).
     pub alvo: Option<u64>,
-    /// Na entrada de sumário: 1 = com o número da página, 2 = com o pontilhado até ele.
+    /// Na entrada de sumário: 1 = com o número da página, 2 = com o pontilhado até ele, 4 = no jeito do LaTeX.
     pub sumario: u8,
     /// Posição do primeiro caractere desta linha no texto do parágrafo (para achar o cursor).
     pub de: usize,
@@ -137,10 +137,18 @@ pub struct LayoutBloco {
     pub marcador_x: Option<f32>,
     /// Depois deste bloco, o que vem começa uma página nova (quebra de página).
     pub quebra_depois: bool,
+    /// Só aparece na tela (a marca "quebra de página"): o PDF e a impressão pulam.
+    pub so_na_tela: bool,
+    /// Com `quebra_depois`: a página nova tem de ser par (`true`) ou ímpar; se não for, fica uma em branco no meio.
+    pub pagina_par: Option<bool>,
     /// O número automático do título, desenhado antes da primeira linha (fora do texto: o cursor não passa por ele).
     pub numero: Option<NumeroDoTitulo>,
     /// A cor do marcador de lista; 0 = a do texto.
     pub cor_marcador: u32,
+    /// O estilo do marcador além da família do texto (`NEGRITO` no `\textbf{Art. 1º}` do LaTeX).
+    pub estilo_marcador: u8,
+    /// Espaço elástico antes (`Atrib::encher`).
+    pub encher: bool,
 }
 
 /// O número de um título ("1.2"), com a letra do próprio título.
@@ -172,6 +180,7 @@ struct Marca {
 }
 
 /// Uma palavra ou um espaço, com a largura já medida.
+#[derive(Clone)]
 struct Ficha {
     texto: String,
     marca: Marca,
@@ -185,6 +194,10 @@ struct Ficha {
     atomo: bool,
     /// Fórmula em linha (`$…$`): uma ficha só, que não se parte nem se junta com a vizinha.
     formula: bool,
+    /// Quebra de linha forçada ([`QUEBRA_DE_LINHA`]): termina a linha nela.
+    quebra: bool,
+    /// Pedaço de palavra partida no fim da linha: ganha o hífen desenhado depois dele.
+    hifen: bool,
 }
 
 /// Onde o texto de um bloco começa, o quanto cabe, e como medir o tipo de bloco.
@@ -217,7 +230,8 @@ impl Base {
 
 fn estilo_efetivo(t: &Trecho, extra: u8) -> u8 {
     let mut e = t.estilo | extra;
-    if t.link.is_some() {
+    // Link com cor própria (o `colorlinks` do LaTeX) só pinta; sem cor, o azul sublinhado de sempre.
+    if t.link.is_some() && t.fmt.cor == 0 {
         e |= SUBLINHADO;
     }
     e
@@ -239,7 +253,7 @@ fn marca_do_trecho(t: &Trecho, b: &Base) -> Marca {
     }
     let cor = if let Some(r) = t.rev.as_deref() {
         cor_do_autor(&r.autor)
-    } else if t.link.is_some() {
+    } else if t.link.is_some() && t.fmt.cor == 0 {
         COR_LINK
     } else if t.fmt.cor != 0 {
         t.fmt.cor
@@ -268,6 +282,11 @@ fn fichas(trechos: &[Trecho], b: &Base) -> Vec<Ficha> {
         } else if comentados > 0 && marca.realce == 0 {
             marca.realce = COR_COMENTADO;
         }
+        if let Some(Objeto::Imagem { largura, .. }) = t.marca.as_deref() {
+            saida.push(Ficha { atomo: true, largura: *largura, ..ficha("", marca, false, de) });
+            de += 1;
+            continue;
+        }
         if t.marca.is_some() {
             saida.push(Ficha { atomo: true, ..ficha(&texto_do_objeto(t), marca, false, de) });
             de += 1;
@@ -281,13 +300,26 @@ fn fichas(trechos: &[Trecho], b: &Base) -> Vec<Ficha> {
         let mut atual = String::new();
         let mut inicio = de;
         let mut espaco = false;
+        // A palavra que começa com "http" ou "www." é um endereço, mesmo sem link.
+        let mut endereco = false;
         for c in t.texto.chars() {
             if c == '\t' {
                 if !atual.is_empty() {
                     saida.push(ficha(&atual, marca, espaco, inicio));
                     atual.clear();
                 }
-                saida.push(Ficha { texto: " ".into(), marca, largura: 0.0, espaco: false, tab: true, de, atomo: false, formula: false });
+                saida.push(Ficha { texto: " ".into(), marca, largura: 0.0, espaco: false, tab: true, de, atomo: false, formula: false, quebra: false, hifen: false });
+                de += 1;
+                inicio = de;
+                espaco = false;
+                continue;
+            }
+            if c == QUEBRA_DE_LINHA {
+                if !atual.is_empty() {
+                    saida.push(ficha(&atual, marca, espaco, inicio));
+                    atual.clear();
+                }
+                saida.push(Ficha { texto: " ".into(), marca, largura: 0.0, espaco: true, tab: false, de, atomo: false, formula: false, quebra: true, hifen: false });
                 de += 1;
                 inicio = de;
                 espaco = false;
@@ -302,6 +334,13 @@ fn fichas(trechos: &[Trecho], b: &Base) -> Vec<Ficha> {
             espaco = c == ' ';
             atual.push(c);
             de += 1;
+            endereco = !espaco && (endereco || atual == "http" || atual == "www.");
+            // Como o pacote url: um endereço pode quebrar a linha depois destes sinais.
+            if (t.link.is_some() || endereco) && matches!(c, '/' | ':' | '.' | '?' | '&' | '=' | '#' | '_') {
+                saida.push(ficha(&atual, marca, false, inicio));
+                atual.clear();
+                inicio = de;
+            }
         }
         if !atual.is_empty() {
             saida.push(ficha(&atual, marca, espaco, inicio));
@@ -311,7 +350,7 @@ fn fichas(trechos: &[Trecho], b: &Base) -> Vec<Ficha> {
 }
 
 fn ficha(texto: &str, marca: Marca, espaco: bool, de: usize) -> Ficha {
-    Ficha { texto: texto.to_string(), marca, largura: largura(texto, marca.estilo, marca.tamanho), espaco, tab: false, de, atomo: false, formula: false }
+    Ficha { texto: texto.to_string(), marca, largura: largura(texto, marca.estilo, marca.tamanho), espaco, tab: false, de, atomo: false, formula: false, quebra: false, hifen: false }
 }
 
 /// O que um objeto preso ao texto mostra: o rótulo que o motor calculou. O campo de página, que só se
@@ -343,25 +382,99 @@ fn partir_palavra(f: &Ficha, limite: f32) -> Vec<Ficha> {
     partes
 }
 
+/// A palavra que não cabe no fim de uma linha justificada: o pedaço (até a sílaba) que cabe com o
+/// hífen e o resto. Como o TeX, só parte quando a linha sem ela esticaria os espaços além do normal
+/// (metade da largura do espaço em cada um).
+fn hifenizar(f: &Ficha, linha: &[Ficha], sobra: f32) -> Option<(Ficha, Ficha)> {
+    if f.espaco || f.tab || f.atomo || f.formula || f.quebra || f.marca.estilo & CODIGO != 0 {
+        return None;
+    }
+    let fim = linha.iter().rposition(|x| !x.espaco)?;
+    let espacos: Vec<&Ficha> = linha[..fim].iter().filter(|x| x.espaco).collect();
+    let folga = sobra + linha[fim + 1..].iter().map(|x| x.largura).sum::<f32>();
+    if !espacos.is_empty() && folga <= espacos.iter().map(|x| x.largura).sum::<f32>() * 0.5 {
+        return None;
+    }
+    let hifen = largura("-", f.marca.estilo, f.marca.tamanho);
+    let cs: Vec<char> = f.texto.chars().collect();
+    let k = crate::silabas::pontos(&f.texto).into_iter().rev().find(|&k| largura(&cs[..k].iter().collect::<String>(), f.marca.estilo, f.marca.tamanho) + hifen <= sobra)?;
+    let antes = Ficha { hifen: true, ..ficha(&cs[..k].iter().collect::<String>(), f.marca, false, f.de) };
+    Some((antes, ficha(&cs[k..].iter().collect::<String>(), f.marca, false, f.de + k)))
+}
+
+#[path = "quebra_tex.rs"]
+mod quebra_tex;
+
+thread_local! {
+    /// O documento em composição veio do LaTeX (`Extras::composicao_tex`): o justificado quebra como o TeX.
+    static COMPOSICAO_TEX: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Liga a quebra do TeX no justificado para o que se compuser daqui em diante nesta thread.
+pub fn composicao_tex(sim: bool) {
+    COMPOSICAO_TEX.with(|c| c.set(sim));
+}
+
+/// As linhas do parágrafo: no justificado de um documento do LaTeX, o parágrafo inteiro de uma vez
+/// (cada trecho entre quebras forçadas); senão, ou se nada cabe na tolerância, linha a linha.
+fn quebrar(fichas: Vec<Ficha>, limite_geral: f32, primeira: f32, justificado: bool) -> Vec<Vec<Ficha>> {
+    if !justificado || !COMPOSICAO_TEX.with(|c| c.get()) || fichas.iter().any(|f| f.tab) {
+        return quebrar_linha_a_linha(fichas, limite_geral, primeira, justificado);
+    }
+    let mut linhas: Vec<Vec<Ficha>> = Vec::new();
+    let mut trecho: Vec<Ficha> = Vec::new();
+    let n = fichas.len();
+    for (k, f) in fichas.iter().cloned().enumerate() {
+        let quebra = f.quebra;
+        if !quebra {
+            trecho.push(f.clone());
+        }
+        if quebra || k + 1 == n {
+            let largura_primeira = if linhas.is_empty() { (limite_geral - primeira).max(1.0) } else { limite_geral };
+            let Some(mut ls) = quebra_tex::quebrar(&mut trecho, largura_primeira, limite_geral) else {
+                return quebrar_linha_a_linha(fichas, limite_geral, primeira, justificado);
+            };
+            if quebra {
+                match ls.last_mut() {
+                    Some(l) => l.push(f),
+                    None => ls.push(vec![f]),
+                }
+            }
+            linhas.extend(ls);
+            trecho.clear();
+        }
+    }
+    linhas
+}
+
 /// Quebra gulosa: enche a linha até não caber. Devolve as linhas como listas de fichas.
 /// `limite_geral` vale para as linhas de continuação; a primeira tem `limite_geral - primeira` (recuo de primeira linha).
-fn quebrar(fichas: Vec<Ficha>, limite_geral: f32, primeira: f32) -> Vec<Vec<Ficha>> {
+fn quebrar_linha_a_linha(fichas: Vec<Ficha>, limite_geral: f32, primeira: f32, justificado: bool) -> Vec<Vec<Ficha>> {
     let mut linhas: Vec<Vec<Ficha>> = Vec::new();
     let mut atual: Vec<Ficha> = Vec::new();
     let mut w = 0.0;
-    // O que vem depois de cada ficha (para a tabulação saber se o resto cabe na linha).
+    // O que vem depois de cada ficha até a quebra forçada (para a tabulação saber se o resto cabe na linha).
     let mut depois: Vec<f32> = fichas.iter().rev().scan(0.0, |soma, f| {
+        if f.quebra {
+            *soma = 0.0;
+        }
         let antes = *soma;
         *soma += f.largura;
         Some(antes)
     }).collect();
     depois.reverse();
-    for (k, f) in fichas.into_iter().enumerate() {
+    for (k, mut f) in fichas.into_iter().enumerate() {
         let limite = if linhas.is_empty() { (limite_geral - primeira).max(1.0) } else { limite_geral };
         // Tabulação: o que vem depois dela vai inteiro para a direita; se não cabe, desce junto para a linha seguinte.
         if f.tab && w + depois[k] > limite && !atual.is_empty() {
             linhas.push(std::mem::take(&mut atual));
             w = 0.0;
+        }
+        if f.quebra {
+            atual.push(f);
+            linhas.push(std::mem::take(&mut atual));
+            w = 0.0;
+            continue;
         }
         if f.espaco {
             // Espaço no começo de uma linha de continuação some; no começo do parágrafo fica.
@@ -371,13 +484,21 @@ fn quebrar(fichas: Vec<Ficha>, limite_geral: f32, primeira: f32) -> Vec<Vec<Fich
             }
             continue;
         }
-        if w + f.largura > limite && !atual.is_empty() {
+        // Justificado, como o TeX: os espaços da linha encolhem até 1/3 para caber mais uma palavra.
+        let encolhe = |atual: &[Ficha]| if justificado { atual.iter().filter(|x| x.espaco).map(|x| x.largura).sum::<f32>() / 3.0 } else { 0.0 };
+        if w + f.largura > limite + encolhe(&atual) && !atual.is_empty() {
+            if justificado {
+                if let Some((antes, resto)) = hifenizar(&f, &atual, limite - w) {
+                    atual.push(antes);
+                    f = resto;
+                }
+            }
             linhas.push(std::mem::take(&mut atual));
             w = 0.0;
         }
         let pecas = if f.largura > limite && !f.atomo && !f.formula { partir_palavra(&f, limite) } else { vec![f] };
         for p in pecas {
-            if w + p.largura > limite && !atual.is_empty() {
+            if w + p.largura > limite + encolhe(&atual) && !atual.is_empty() {
                 linhas.push(std::mem::take(&mut atual));
                 w = 0.0;
             }
@@ -409,7 +530,7 @@ fn pedacos_da_linha(mut fichas: Vec<Ficha>, x0: f32, y: f32, ultima: bool, justi
             sobra / espacos as f32
         }
     });
-    let partir = justificar.is_some() && extra > 0.0;
+    let partir = justificar.is_some() && extra != 0.0;
     let larguras: Vec<f32> = fichas.iter().map(|f| f.largura).collect();
     for (k, f) in fichas.into_iter().enumerate() {
         if f.tab {
@@ -434,6 +555,26 @@ fn pedacos_da_linha(mut fichas: Vec<Ficha>, x0: f32, y: f32, ultima: bool, justi
     saida
 }
 
+/// As imagens presas ao texto da linha, em pé na linha de base; a mais alta que o texto empurra a linha
+/// para baixo.
+fn imagens_na_linha(trechos: &[Trecho], altura: &mut f32, base: &mut f32, pedacos: &mut [Pedaco]) -> Vec<Deco> {
+    let imagens: Vec<(f32, &str, f32, f32)> = pedacos
+        .iter()
+        .filter(|p| p.atomo)
+        .filter_map(|p| match crate::texto::objeto_em(trechos, p.de) {
+            Some(Objeto::Imagem { origem, largura, altura }) => Some((p.x, origem.as_str(), *largura, *altura)),
+            _ => None,
+        })
+        .collect();
+    let falta = imagens.iter().map(|i| i.3 - *base).fold(0.0, f32::max);
+    if falta > 0.0 {
+        *altura += falta;
+        *base += falta;
+        pedacos.iter_mut().for_each(|p| p.y += falta);
+    }
+    imagens.into_iter().map(|(x, origem, w, h)| Deco::Imagem { x, y: *base - h, w, h, origem: origem.to_string() }).collect()
+}
+
 /// A linha de base dentro de uma linha de altura `altura` para texto de `tamanho`.
 fn linha_de_base(altura: f32, tamanho: f32) -> f32 {
     (altura - tamanho) / 2.0 + tamanho * 0.8
@@ -444,9 +585,10 @@ fn texto_corrido(trechos: &[Trecho], tamanho: f32, extra: u8, cor: u32, x0: f32,
     texto_formatado(trechos, &Base::novo(tamanho, extra, cor, x0, limite), &Atrib::default())
 }
 
-/// O texto de uma célula de tabela: sem tamanho próprio, porque a altura da linha da tabela é fixa.
-fn texto_celula(trechos: &[Trecho], tamanho: f32, extra: u8, limite: f32, pagina: f32) -> Vec<Linha> {
-    let b = Base { usar_tamanho: false, pagina, ..Base::novo(tamanho, extra, COR_TEXTO, 0.0, limite) };
+/// O texto de uma célula de tabela: sem tamanho próprio, porque a altura da linha da tabela é fixa
+/// (a do LaTeX, `tamanhos`, mostra o `{\small …}` da célula: a linha continua com a altura do corpo).
+fn texto_celula(trechos: &[Trecho], tamanho: f32, extra: u8, limite: f32, pagina: f32, tamanhos: bool) -> Vec<Linha> {
+    let b = Base { usar_tamanho: tamanhos, pagina, ..Base::novo(tamanho, extra, COR_TEXTO, 0.0, limite) };
     texto_formatado(trechos, &b, &Atrib::default())
 }
 
@@ -478,22 +620,27 @@ fn texto_formatado(trechos: &[Trecho], b: &Base, a: &Atrib) -> Vec<Linha> {
     let util = (b.limite - a.recuo_esq.max(0.0) - a.recuo_dir.max(0.0)).max(1.0);
     // A primeira linha pode começar antes (negativo) da margem do parágrafo, até a borda esquerda.
     let primeira = a.primeira.max(-esq);
-    let quebradas = quebrar(fichas(trechos, b), util, primeira);
+    let quebradas = quebrar(fichas(trechos, b), util, primeira, a.alinhamento == Alinhamento::Justificado);
     let total = quebradas.len();
     let fator = fator_entrelinha(a);
     let mut linhas: Vec<Linha> = quebradas
         .into_iter()
         .enumerate()
         .map(|(k, f)| {
-            let ultima = k + 1 == total;
+            // O `\hfill\\` do LaTeX (tabulação e quebra): a linha não estica, como a última.
+            let hfil = f.iter().rev().skip_while(|x| x.quebra || x.espaco && !x.tab).next().is_some_and(|x| x.tab) && f.last().is_some_and(|x| x.quebra);
+            let ultima = k + 1 == total || hfil;
             let disponivel = if k == 0 { util - primeira } else { util };
             let inicio = if k == 0 { esq + primeira } else { esq };
-            let visivel = largura_visivel(&f);
+            // A palavra partida: o hífen entra na largura da linha e é desenhado depois do último pedaço.
+            let hifen = f.iter().rev().find(|x| !x.espaco).filter(|x| x.hifen).map(|x| (x.marca, largura("-", x.marca.estilo, x.marca.tamanho)));
+            let visivel = largura_visivel(&f) + hifen.map_or(0.0, |h| h.1);
             let (x_ini, justificar) = match a.alinhamento {
                 Alinhamento::Esquerda => (inicio, None),
                 Alinhamento::Centro => (inicio + ((disponivel - visivel) / 2.0).max(0.0), None),
                 Alinhamento::Direita => (inicio + (disponivel - visivel).max(0.0), None),
-                Alinhamento::Justificado => (inicio, (!ultima).then_some((disponivel - visivel).max(0.0))),
+                // A linha que só coube com os espaços encolhidos encolhe mesmo sendo a última.
+                Alinhamento::Justificado => (inicio, (!ultima || visivel > disponivel).then_some(disponivel - visivel)),
             };
             let tam = corpo_da_linha(&f, b.tamanho);
             let mut altura = (tam * ENTRELINHA * fator).round();
@@ -502,15 +649,32 @@ fn texto_formatado(trechos: &[Trecho], b: &Base, a: &Atrib) -> Vec<Linha> {
             if b.usar_tamanho {
                 acomodar_formulas(&mut altura, &mut base, &mut pedacos);
             }
-            Linha { altura, de: pedacos.first().map_or(0, |p| p.de), x0: x_ini, base, tam, pedacos, ..Linha::default() }
+            let mut deco = imagens_na_linha(trechos, &mut altura, &mut base, &mut pedacos);
+            if let (Some((m, _)), Some(p)) = (hifen, pedacos.last()) {
+                deco.push(Deco::Texto { x: p.x + largura(&p.texto, p.estilo, p.tamanho), y: base - m.desloc, texto: "-".into(), tamanho: m.tamanho, estilo: m.estilo, cor: m.cor });
+            }
+            Linha { altura, de: pedacos.first().map_or(0, |p| p.de), x0: x_ini, base, tam, pedacos, deco, ..Linha::default() }
         })
         .collect();
     if linhas.is_empty() {
         linhas.push(linha_vazia(b, a, esq + primeira, util - primeira));
     }
-    decorar(&mut linhas, esq, util, a);
+    // A folga do fundo antes das bordas: a de baixo fica embaixo do texto, não em cima dele.
     if a.fundo != 0 {
-        acolchoar(&mut linhas, FOLGA_DO_FUNDO);
+        // Na caixa do `tcolorbox`, 2 mm em volta do texto e 1 mm na faixa do título (fundo da cor da moldura).
+        let folga = match a.borda & CAIXA_ARREDONDADA != 0 {
+            true if a.fundo == a.cor_borda => MM,
+            true => 2.0 * MM,
+            false => FOLGA_DO_FUNDO,
+        };
+        acolchoar(&mut linhas, folga);
+    }
+    // Num item (o texto depois do marcador) a moldura de uma caixa fica no recuo do bloco, não no do texto.
+    if a.borda != 0 && b.pagina > 0.0 {
+        let esq = a.recuo_esq.max(0.0);
+        decorar(&mut linhas, esq, (b.pagina - esq - a.recuo_dir.max(0.0)).max(1.0), a);
+    } else {
+        decorar(&mut linhas, esq, util, a);
     }
     prender_notas(&mut linhas, trechos, b.largura_da_pagina());
     linhas
@@ -590,35 +754,78 @@ fn linha_vazia(b: &Base, a: &Atrib, inicio: f32, disponivel: f32) -> Linha {
     Linha { altura, x0, base: linha_de_base(altura, b.tamanho), tam: b.tamanho, ..Linha::default() }
 }
 
+/// Um milímetro em pontos.
+const MM: f32 = 72.0 / 25.4;
+
+/// Bit de `Atrib::borda`: a caixa do `tcolorbox` (fio de 0,5 mm, cantos de 1 mm, texto a 4 mm do fio).
+pub const CAIXA_ARREDONDADA: u8 = 16;
+
 /// Fundo e bordas do parágrafo: um retângulo por linha e traços nas bordas pedidas.
 fn decorar(linhas: &mut [Linha], esq: f32, util: f32, a: &Atrib) {
     if a.fundo == 0 && a.borda == 0 {
         return;
     }
-    let (x1, x2) = (esq - 4.0, esq + util + 4.0);
+    let caixa = a.borda & CAIXA_ARREDONDADA != 0;
+    let folga = if caixa { 4.0 * MM } else { 4.0 };
+    let (x1, x2) = (esq - folga, esq + util + folga);
+    // O raio dos cantos: só onde a moldura fecha (em cima no primeiro bloco, embaixo no último).
+    let r = if caixa { MM } else { 0.0 };
     let n = linhas.len();
     for (k, l) in linhas.iter_mut().enumerate() {
         let h = l.altura;
+        let (topo, pe) = (k == 0 && a.borda & 4 != 0, k + 1 == n && a.borda & 8 != 0);
+        let (ya, yb) = (if topo { r } else { 0.0 }, if pe { h - r } else { h });
+        let cantos = [(topo, x1 + r, r, -1.0, -1.0), (topo, x2 - r, r, 1.0, -1.0), (pe, x1 + r, h - r, -1.0, 1.0), (pe, x2 - r, h - r, 1.0, 1.0)];
+        // shortcut: o canto é um quarto de círculo em 8 traços (o quadro não tem arco); trocar se o raio crescer.
+        let arco = |deco: &mut Vec<Deco>, raio: f32, espessura: f32, cor: u32| {
+            for (sim, cx, cy, sx, sy) in cantos {
+                if !sim || r == 0.0 {
+                    continue;
+                }
+                let ponto = |i: u8| {
+                    let t = f32::from(i) * std::f32::consts::FRAC_PI_2 / 8.0;
+                    (cx + sx * raio * t.cos(), cy + sy * raio * t.sin())
+                };
+                for i in 0..8 {
+                    let ((xa, ya), (xb, yb)) = (ponto(i), ponto(i + 1));
+                    // Cada traço passa um tico da ponta: sem isso a emenda abre um dente do lado de fora da curva.
+                    let (dx, dy) = (xb - xa, yb - ya);
+                    let k = espessura * 0.12 / dx.hypot(dy).max(0.001);
+                    deco.push(Deco::Traco { x1: xa - dx * k, y1: ya - dy * k, x2: xb + dx * k, y2: yb + dy * k, espessura, cor });
+                }
+            }
+        };
         let mut deco = Vec::new();
         if a.fundo != 0 {
             // Um tico a mais para baixo: dois blocos de fundo seguidos (a faixa do cabeçalho) não mostram a emenda.
-            deco.push(Deco::Retangulo { x: x1, y: 0.0, w: x2 - x1, h: h + 0.75, cor: a.fundo });
+            deco.push(Deco::Retangulo { x: x1, y: ya, w: x2 - x1, h: yb - ya + if pe { 0.0 } else { 0.75 }, cor: a.fundo });
+            // Os cantos arredondados: o fundo entre eles, sem as quinas.
+            if topo && r > 0.0 {
+                deco.push(Deco::Retangulo { x: x1 + r, y: 0.0, w: x2 - x1 - 2.0 * r, h: r, cor: a.fundo });
+            }
+            if pe && r > 0.0 {
+                deco.push(Deco::Retangulo { x: x1 + r, y: h - r, w: x2 - x1 - 2.0 * r, h: r, cor: a.fundo });
+            }
+            // O quarto de círculo do canto: um traço da grossura do raio no meio dele.
+            arco(&mut deco, r / 2.0, r * 1.1, a.fundo);
         }
-        // A chamada (cor própria) tem a barra mais grossa.
-        let (espessura, cor) = if a.cor_borda != 0 { (3.0, a.cor_borda) } else { (0.75, COR_TEXTO) };
+        // A chamada (só a barra da esquerda, com cor própria) é mais grossa; a moldura colorida, não.
+        let espessura = if caixa { 0.5 * MM } else if a.cor_borda != 0 && a.borda == 1 { 3.0 } else { 0.75 };
+        let cor = if a.cor_borda != 0 { a.cor_borda } else { COR_TEXTO };
         let traco = |xa, ya, xb, yb| Deco::Traco { x1: xa, y1: ya, x2: xb, y2: yb, espessura, cor };
         if a.borda & 1 != 0 {
-            deco.push(traco(x1, 0.0, x1, h));
+            deco.push(traco(x1, ya, x1, yb));
         }
         if a.borda & 2 != 0 {
-            deco.push(traco(x2, 0.0, x2, h));
+            deco.push(traco(x2, ya, x2, yb));
         }
-        if a.borda & 4 != 0 && k == 0 {
-            deco.push(traco(x1, 0.0, x2, 0.0));
+        if topo {
+            deco.push(traco(x1 + r, 0.0, x2 - r, 0.0));
         }
-        if a.borda & 8 != 0 && k + 1 == n {
-            deco.push(traco(x1, h, x2, h));
+        if pe {
+            deco.push(traco(x1 + r, h, x2 - r, h));
         }
+        arco(&mut deco, r, espessura, cor);
         l.deco.splice(0..0, deco);
     }
 }
@@ -638,16 +845,19 @@ fn base_do_estilo(tamanho: f32, extra: u8, limite: f32, e: Option<&Estilo>) -> B
 fn titulo(nivel: u8, texto: &[Trecho], limite: f32, a: &Atrib, en: &Entorno) -> LayoutBloco {
     let i = usize::from(nivel.clamp(1, 6)) - 1;
     let b = base_do_estilo(TAMANHOS_TITULO[i], NEGRITO, limite, en.estilo);
-    let antes = if i == 0 { 18.0 } else { 12.0 };
+    let antes = en.estilo.and_then(|e| e.antes).unwrap_or(if i == 0 { 18.0 } else { 12.0 });
+    let depois = en.estilo.and_then(|e| e.depois).unwrap_or(6.0);
     let (linhas, numero) = com_numero(texto, &b, a, en.numero);
-    LayoutBloco { manter_com_proximo: true, numero, ..bloco_de_texto(linhas, antes, 6.0) }
+    LayoutBloco { manter_com_proximo: true, numero, ..bloco_de_texto(linhas, antes, depois) }
 }
 
 /// O texto com o número automático na frente (título numerado, legenda): o número fica fora do
 /// texto, com um vão de meio quadratim, e a primeira linha recua o tanto dele.
 fn com_numero(texto: &[Trecho], b: &Base, a: &Atrib, numero: Option<&str>) -> (Vec<Linha>, Option<NumeroDoTitulo>) {
     let Some(n) = numero else { return (texto_formatado(texto, b, a), None) };
-    let recuo = largura(n, b.extra, b.tamanho) + b.tamanho * 0.6;
+    // "Tabela 1:" (LaTeX) leva um espaço normal depois; "Tabela 1 –", meio quadratim.
+    let vao = if n.ends_with([':', '.']) { largura(" ", b.extra, b.tamanho) } else { b.tamanho * 0.6 };
+    let recuo = largura(n, b.extra, b.tamanho) + vao;
     let linhas = texto_formatado(texto, b, &Atrib { primeira: a.primeira + recuo, ..*a });
     let x = linhas.first().map_or(0.0, |l| l.x0) - recuo;
     (linhas, Some(NumeroDoTitulo { texto: n.to_string(), x, tamanho: b.tamanho, estilo: b.extra, cor: b.cor }))
@@ -655,7 +865,11 @@ fn com_numero(texto: &[Trecho], b: &Base, a: &Atrib, numero: Option<&str>) -> (V
 
 /// Um parágrafo; a legenda (figura, tabela) leva o número e fica junto do que vem depois dela.
 fn paragrafo(texto: &[Trecho], limite: f32, a: &Atrib, en: &Entorno) -> LayoutBloco {
-    let (linhas, numero) = com_numero(texto, &base_do_estilo(CORPO, 0, limite, en.estilo), a, en.numero);
+    // A legenda em negrito ("\captionsetup{font=bf}") leva o número em negrito também.
+    let extra = if a.legenda != 0 && texto.first().is_some_and(|t| t.estilo & NEGRITO != 0) { NEGRITO } else { 0 };
+    // A legenda do LaTeX ("Tabela 1:") tem o número na fonte do texto dela (serifada).
+    let extra = extra | if en.numero.is_some_and(|n| n.ends_with([':', '.'])) { texto.first().map_or(0, |t| t.estilo & SERIFA) } else { 0 };
+    let (linhas, numero) = com_numero(texto, &base_do_estilo(CORPO, extra, limite, en.estilo), a, en.numero);
     LayoutBloco { numero, manter_com_proximo: a.legenda == 2, ..bloco_de_texto(linhas, 0.0, 6.0) }
 }
 
@@ -671,6 +885,44 @@ fn item(nivel: u8, texto: &[Trecho], limite: f32, a: &Atrib) -> LayoutBloco {
         return bloco_de_texto(linhas, 0.0, 3.0);
     }
     LayoutBloco { marcador_x: Some(x), cor_marcador: a.cor_marcador, ..bloco_de_texto(linhas, 0.0, 3.0) }
+}
+
+/// O item com rótulo de texto do LaTeX (`label=\textbf{Art. \arabic*º}` do `enumitem`, `align=left`): o
+/// rótulo no recuo de primeira linha (negativo) e o texto no recuo do bloco; o rótulo mais largo que o
+/// recuo empurra só a primeira linha, com um vão de meio quadratim.
+pub fn item_com_rotulo(nivel: u8, texto: &[Trecho], limite: f32, a: &Atrib, rotulo: &str, estilo_rotulo: u8, a_direita: bool) -> LayoutBloco {
+    let texto_x = 18.0 + 18.0 * f32::from(nivel) + a.recuo_esq.max(0.0);
+    let familia = texto.first().map_or(0, |t| t.estilo & SERIFA);
+    let w = if rotulo == BOLINHA { 0.8 * CORPO } else { largura(rotulo, familia | estilo_rotulo, CORPO) };
+    // O `align=right` (o padrão do `enumitem`): o rótulo termina meio quadratim antes do texto.
+    let x = if a_direita { texto_x - 0.5 * CORPO - w } else { texto_x + a.primeira.min(0.0) }.max(0.0);
+    let primeira = (x + w + 0.5 * CORPO - texto_x).max(0.0);
+    let linhas = texto_formatado(texto, &Base { pagina: limite, ..Base::novo(CORPO, 0, COR_TEXTO, texto_x, limite - texto_x) }, &Atrib { recuo_esq: 0.0, primeira, ..a.clone() });
+    LayoutBloco { marcador_x: Some(x), cor_marcador: a.cor_marcador, estilo_marcador: estilo_rotulo, ..bloco_de_texto(linhas, a.antes.unwrap_or(0.0), a.depois.unwrap_or(3.0)) }
+}
+
+/// O rótulo que é a bolinha vazia do `\bigcirc` (as caixas de marcar da classe `exam`): o quadro a
+/// desenha, porque a fonte do texto não tem o ◯ grande.
+pub const BOLINHA: &str = "\u{25EF}";
+
+/// O espaço `g` em cima da primeira linha, por dentro do fundo e da moldura dos lados (o `\topsep`
+/// de um `center` dentro de uma caixa, que não pode ser vão entre blocos sem abrir a moldura).
+pub fn acolchoar_em_cima(lay: &mut LayoutBloco, g: f32) {
+    let Some(l) = lay.linhas.first_mut() else { return };
+    l.altura += g;
+    l.base += g;
+    l.pedacos.iter_mut().for_each(|p| p.y += g);
+    for d in &mut l.deco {
+        match d {
+            Deco::Retangulo { y, h, .. } if *y <= 0.0 => *h += g,
+            Deco::Traco { x1, x2, y1, y2, .. } if x1 == x2 && *y1 <= 0.0 => *y2 += g,
+            Deco::Retangulo { y, .. } | Deco::Imagem { y, .. } | Deco::Texto { y, .. } => *y += g,
+            Deco::Traco { y1, y2, .. } => {
+                *y1 += g;
+                *y2 += g;
+            }
+        }
+    }
 }
 
 /// A caixa de seleção de um item de tarefa (e o visto, se marcada), na primeira linha.
@@ -723,6 +975,88 @@ fn codigo(fonte: &str, limite: f32) -> LayoutBloco {
     LayoutBloco { linhas, antes: 4.0, depois: 10.0, minimo_antes: 2, minimo_depois: 2, ..LayoutBloco::default() }
 }
 
+/// A listagem com o estilo do `listings` (`Bloco.latex`): pares `chave=valor` separados por espaço,
+/// cores em `RRGGBBAA` hexadecimal. `tam` corpo; `texto`, `chave`, `comentario`, `aspas` cores do
+/// realce; `negrito`/`italico` na palavra-chave/no comentário; `fundo`; `moldura` cor do fio.
+pub fn codigo_latex(linguagem: &str, fonte: &str, estilo: &str, limite: f32, a: &Atrib) -> LayoutBloco {
+    let mut tamanho = 9.5;
+    let (mut cores, mut fundo, mut moldura, mut chave, mut comentario) = ([COR_TEXTO, 0, 0, 0], 0, 0, NEGRITO, 0);
+    for par in estilo.split_whitespace() {
+        let (k, v) = par.split_once('=').unwrap_or((par, ""));
+        let cor = u32::from_str_radix(v, 16).ok();
+        match (k, cor) {
+            ("tam", _) => tamanho = v.parse().unwrap_or(tamanho),
+            ("texto", Some(c)) => cores[0] = c,
+            ("chave", Some(c)) => cores[1] = c,
+            ("comentario", Some(c)) => cores[2] = c,
+            ("aspas", Some(c)) => cores[3] = c,
+            ("fundo", Some(c)) => fundo = c,
+            ("moldura", Some(c)) => moldura = c,
+            ("sem_negrito", _) => chave = 0,
+            ("italico", _) => comentario = ITALICO,
+            _ => {}
+        }
+    }
+    // Os que não ganharam cor própria ficam na do texto.
+    for i in 1..4 {
+        if cores[i] == 0 {
+            cores[i] = cores[0];
+        }
+    }
+    // O `frame=single` do `listings`: `framesep` de 3pt entre o fio e o texto.
+    let (x0, largura) = (a.recuo_esq, (limite - a.recuo_esq - a.recuo_dir).max(20.0));
+    let folga = if moldura != 0 { 3.4 } else { 6.0 };
+    let altura = tamanho * 1.22;
+    let base = linha_de_base(altura, tamanho);
+    let passo = tamanho * largura_do_caractere('m', CODIGO) as f32 / 1000.0;
+    let colunas = (((largura - 2.0 * folga) / passo).floor() as usize).max(1);
+    let mut linhas = Vec::new();
+    let mut de = 0;
+    for (crua, trechos) in fonte.split('\n').zip(crate::realce::realcar(linguagem, fonte)) {
+        let cs: Vec<char> = crua.chars().collect();
+        let mut inicio = 0;
+        loop {
+            let fim = (inicio + colunas).min(cs.len());
+            let pedacos = trechos.iter().filter(|(r, _)| r.start < fim && r.end > inicio).map(|(r, t)| {
+                let (a, b) = (r.start.max(inicio), r.end.min(fim));
+                let (estilo, cor) = match t {
+                    crate::realce::Tipo::Texto => (CODIGO, cores[0]),
+                    crate::realce::Tipo::Chave => (CODIGO | chave, cores[1]),
+                    crate::realce::Tipo::Comentario => (CODIGO | comentario, cores[2]),
+                    crate::realce::Tipo::Aspas => (CODIGO, cores[3]),
+                };
+                Pedaco { x: x0 + folga + (a - inicio) as f32 * passo, y: base, texto: cs[a..b].iter().collect(), estilo, tamanho, cor, de: de + a, ..Pedaco::default() }
+            }).collect();
+            linhas.push(Linha { altura, pedacos, de: de + inicio, x0: x0 + folga, base, tam: tamanho, ..Linha::default() });
+            inicio = fim;
+            if inicio >= cs.len() {
+                break;
+            }
+        }
+        de += cs.len() + 1;
+    }
+    acolchoar(&mut linhas, folga);
+    // shortcut: o `frameround` sai com cantos retos; desenhar o arco quando houver Deco de curva.
+    let n = linhas.len();
+    for (i, l) in linhas.iter_mut().enumerate() {
+        let (x1, h) = (x0 + largura, l.altura);
+        if fundo != 0 {
+            l.deco.push(Deco::Retangulo { x: x0, y: 0.0, w: largura, h, cor: fundo });
+        }
+        if moldura != 0 {
+            let fio = |x1, y1, x2, y2| Deco::Traco { x1, y1, x2, y2, espessura: 0.4, cor: moldura };
+            l.deco.extend([fio(x0, 0.0, x0, h), fio(x1, 0.0, x1, h)]);
+            if i == 0 {
+                l.deco.push(fio(x0, 0.0, x1, 0.0));
+            }
+            if i + 1 == n {
+                l.deco.push(fio(x0, h, x1, h));
+            }
+        }
+    }
+    LayoutBloco { linhas, antes: 6.0, depois: 6.0, minimo_antes: 2, minimo_depois: 2, ..LayoutBloco::default() }
+}
+
 /// Aumenta a primeira e a última linha (o "padding" do bloco de código).
 fn acolchoar(linhas: &mut [Linha], extra: f32) {
     let n = linhas.len();
@@ -742,7 +1076,7 @@ fn acolchoar(linhas: &mut [Linha], extra: f32) {
     }
 }
 
-fn celulas_da_linha(linha: &[Vec<Trecho>], colunas: usize, largura_col: f32, cabecalho: bool, mesclagens: &[MesclagemTabela], indice_linha: usize) -> Linha {
+fn celulas_da_linha(linha: &[Vec<Trecho>], colunas: usize, largura_col: f32, cabecalho: bool, mesclagens: &[MesclagemTabela], indice_linha: usize, estica: f32, fundo: u32) -> Linha {
     let tam = 10.0;
     let extra = if cabecalho { NEGRITO } else { 0 };
     let pagina = largura_col * colunas as f32;
@@ -752,15 +1086,16 @@ fn celulas_da_linha(linha: &[Vec<Trecho>], colunas: usize, largura_col: f32, cab
             return Vec::new(); // interior da mesclagem: sem texto ou borda interna
         }
         let largura = regiao.map_or(largura_col, |m| largura_col * m.colunas as f32);
-        texto_celula(linha.get(c).map_or(&[][..], Vec::as_slice), tam, extra, largura - 10.0, pagina)
+        texto_celula(linha.get(c).map_or(&[][..], Vec::as_slice), tam, extra, largura - 10.0, pagina, false)
     }).collect();
     let linhas_max = compostas.iter().map(Vec::len).max().unwrap_or(1);
-    let altura = (tam * ENTRELINHA).round();
+    let altura = (tam * ENTRELINHA * estica).round();
     let total = altura * linhas_max as f32 + 8.0;
     let mut saida = Linha { altura: total, ..Linha::default() };
     let base = 4.0 + linha_de_base(altura, tam);
-    if cabecalho {
-        saida.deco.push(Deco::Retangulo { x: 0.0, y: 0.0, w: largura_col * colunas as f32, h: total, cor: COR_FUNDO_CODIGO });
+    if cabecalho || fundo != 0 {
+        let cor = if cabecalho { COR_FUNDO_CODIGO } else { fundo };
+        saida.deco.push(Deco::Retangulo { x: 0.0, y: 0.0, w: largura_col * colunas as f32, h: total, cor });
     }
     for (c, celula) in compostas.into_iter().enumerate() {
         let x0 = largura_col * c as f32;
@@ -786,15 +1121,274 @@ fn celulas_da_linha(linha: &[Vec<Trecho>], colunas: usize, largura_col: f32, cab
 }
 
 /// Tabela: colunas iguais, uma `Linha` por linha da tabela (a paginação nunca parte uma linha).
-fn tabela(cabecalho: bool, linhas: &[Vec<Celula>], limite: f32, mesclagens: &[MesclagemTabela]) -> LayoutBloco {
+/// A entrelinha do bloco estica as linhas (o `\arraystretch` do LaTeX). O fundo pinta uma linha sim,
+/// outra não, da segunda em diante (o `\rowcolors`): as ímpares, ou as pares se `marcado`.
+fn tabela(cabecalho: bool, linhas: &[Vec<Celula>], limite: f32, mesclagens: &[MesclagemTabela], a: &Atrib) -> LayoutBloco {
+    let estica = fator_entrelinha(a);
     let colunas = linhas.iter().map(Vec::len).max().unwrap_or(1).max(1);
     let largura_col = limite / colunas as f32;
-    let mut compostas: Vec<Linha> = linhas.iter().enumerate().map(|(i, l)| celulas_da_linha(l, colunas, largura_col, cabecalho && i == 0, mesclagens, i)).collect();
+    let fundo = |i: usize| if i >= 1 && ((i + 1) % 2 == 0) == a.marcado { a.fundo } else { 0 };
+    let mut compostas: Vec<Linha> = linhas.iter().enumerate().map(|(i, l)| celulas_da_linha(l, colunas, largura_col, cabecalho && i == 0, mesclagens, i, estica, fundo(i))).collect();
     if let Some(primeira) = compostas.first_mut() {
         let fim = largura_col * colunas as f32;
         primeira.deco.push(Deco::Traco { x1: 0.0, y1: 0.0, x2: fim, y2: 0.0, espessura: 0.5, cor: COR_BORDA });
     }
-    LayoutBloco { linhas: compostas, antes: 4.0, depois: 10.0, minimo_antes: 1, minimo_depois: 1, ..LayoutBloco::default() }
+    com_moldura(LayoutBloco { linhas: compostas, antes: 4.0, depois: 10.0, minimo_antes: 1, minimo_depois: 1, ..LayoutBloco::default() }, limite, a)
+}
+
+/// Uma medida do LaTeX em pontos (`3cm`, `25mm`, `2in`, `40pt`); `None` se depende da página.
+fn medida_latex(v: &str) -> Option<f32> {
+    let v = v.trim();
+    let fim = v.find(|c: char| c.is_ascii_alphabetic())?;
+    let n: f32 = v[..fim].trim().replace(',', ".").parse().ok()?;
+    let por = match &v[fim..] {
+        "pt" => 1.0,
+        "cm" => 28.3465,
+        "mm" => 2.83465,
+        "in" => 72.0,
+        "em" => CORPO,
+        _ => return None,
+    };
+    Some(n * por)
+}
+
+/// As colunas de um `tabular`: o alinhamento de cada uma (`l`, `c`, `r`; `p` quebra o texto na largura
+/// dela), os `|` em cada divisa (uma a mais que as colunas) e se o `@{}` tira o `\tabcolsep` da ponta
+/// esquerda e da direita.
+fn colunas_latex(spec: &str) -> (Vec<char>, Vec<Option<f32>>, Vec<u8>, bool, bool) {
+    let (mut alin, mut largs, mut barras, mut sem_esq, mut sem_dir) = (Vec::new(), Vec::new(), vec![0u8], false, false);
+    let cs: Vec<char> = spec.chars().collect();
+    let mut i = 0;
+    // O `>{\RaggedLeft}`/`>{\centering}` antes de uma coluna `p`: o alinhamento dela.
+    let mut proximo = 'l';
+    // O `{…}` que vem depois de `p`, `m`, `b`, `@`, `>`, `<` e `*{n}`.
+    let pular_grupo = |i: &mut usize| {
+        if cs.get(*i) == Some(&'{') {
+            let mut nivel = 0;
+            while let Some(c) = cs.get(*i) {
+                nivel += match c { '{' => 1, '}' => -1, _ => 0 };
+                *i += 1;
+                if nivel == 0 {
+                    break;
+                }
+            }
+        }
+    };
+    while let Some(&c) = cs.get(i) {
+        i += 1;
+        match c {
+            'l' | 'c' | 'r' | 'X' | 'S' => {
+                alin.push(if c == 'X' { 'l' } else if c == 'S' { 'c' } else { c });
+                largs.push(None);
+                barras.push(0);
+            }
+            'p' | 'm' | 'b' => {
+                let ini = i;
+                pular_grupo(&mut i);
+                let medida: String = cs[(ini + 1).min(i)..i.saturating_sub(1).max(ini)].iter().collect();
+                alin.push(std::mem::replace(&mut proximo, 'l'));
+                largs.push(medida_latex(&medida));
+                barras.push(0);
+            }
+            '|' => *barras.last_mut().unwrap_or(&mut 0) += 1,
+            '@' => {
+                if alin.is_empty() { sem_esq = true } else { sem_dir = true }
+                pular_grupo(&mut i);
+            }
+            '>' | '<' | '!' | '*' => {
+                let ini = i;
+                pular_grupo(&mut i);
+                if c == '>' {
+                    let g: String = cs[ini..i].iter().collect();
+                    proximo = if g.contains("RaggedLeft") || g.contains("raggedleft") { 'r' } else if g.contains("entering") { 'c' } else { 'l' };
+                }
+                if c == '*' {
+                    pular_grupo(&mut i);
+                }
+            }
+            _ => {}
+        }
+    }
+    // O `@` do meio (entre colunas) não é ponta.
+    if sem_dir && !spec.trim_end().ends_with('}') {
+        sem_dir = false;
+    }
+    (alin, largs, barras, sem_esq, sem_dir)
+}
+
+/// Tabela de um `tabular` do LaTeX (11 pt), com os fios e as colunas do código: cada coluna da largura
+/// do maior texto, mais o `\tabcolsep` (6 pt) de cada lado; a linha com a altura do `\strut`
+/// (13,6 pt × `\arraystretch`); o `\toprule`/`\bottomrule` (0,08 em) e o `\midrule` (0,05 em) com o
+/// espaço do `booktabs`; o `\hline` e o `\cline` de 0,4 pt sem espaço; os `|` do código. A tabela
+/// tem a largura dela (não a da página), no meio se o `\centering` pediu.
+/// shortcut: a coluna `p{…}` com medida da página (`0.3\linewidth`) e o `\multirow` saem como `l` sem
+/// quebrar o texto; a célula mesclada fica no meio. Trocar quando aparecer documento que precise.
+pub fn tabela_latex(linhas: &[Vec<Celula>], regua: &str, limite: f32, mesclagens: &[MesclagemTabela], a: &Atrib) -> LayoutBloco {
+    let (spec, fios) = regua.split_once('\n').unwrap_or((regua, ""));
+    let fios: Vec<&str> = fios.split(';').collect();
+    let (alin, largs, barras, sem_esq, sem_dir) = colunas_latex(spec);
+    let n = linhas.iter().map(Vec::len).max().unwrap_or(0).max(alin.len()).max(1);
+    let tam = CORPO;
+    let (em, ex, sep, fio) = (tam, 0.43 * tam, 6.0, 0.4);
+    let estica = fator_entrelinha(a);
+    let altura = 13.6 * estica;
+    let mesclada = |i: usize, c: usize| mesclagens.iter().find(|m| m.contem(i, c));
+    // Cada célula composta numa linha só, e a largura do que ela mostra.
+    let compostas: Vec<Vec<(Vec<Linha>, f32)>> = linhas.iter().map(|l| (0..n).map(|c| {
+        let ls = texto_celula(l.get(c).map_or(&[][..], Vec::as_slice), tam, 0, largs.get(c).copied().flatten().unwrap_or(1.0e6), limite, true);
+        let imagens = ls.iter().flat_map(|l| &l.deco).filter_map(|d| match d { Deco::Imagem { x, w, .. } => Some(x + w), _ => None });
+        let w = ls.iter().flat_map(|l| &l.pedacos).map(|p| p.x + largura(&p.texto, p.estilo, p.tamanho)).chain(imagens).fold(0.0, f32::max);
+        (ls, w)
+    }).collect()).collect();
+    let mut larg: Vec<f32> = (0..n).map(|c| largs.get(c).copied().flatten().unwrap_or(0.0)).collect();
+    for (i, l) in compostas.iter().enumerate() {
+        for (c, (_, w)) in l.iter().enumerate() {
+            if mesclada(i, c).is_none() && largs.get(c).copied().flatten().is_none() {
+                larg[c] = larg[c].max(*w);
+            }
+        }
+    }
+    let pad_esq = |c: usize| if c == 0 && sem_esq { 0.0 } else { sep };
+    let pad_dir = |c: usize| if c + 1 == n && sem_dir { 0.0 } else { sep };
+    // A célula mesclada mais larga que as colunas dela alarga a última.
+    for m in mesclagens {
+        let (fim, w) = ((m.coluna + m.colunas).min(n), compostas.get(m.linha).and_then(|l| l.get(m.coluna)).map_or(0.0, |x| x.1));
+        let tem: f32 = (m.coluna..fim).map(|c| larg[c] + pad_esq(c) + pad_dir(c)).sum::<f32>() - pad_esq(m.coluna) - pad_dir(fim - 1);
+        if w > tem && fim > m.coluna {
+            larg[fim - 1] += w - tem;
+        }
+    }
+    let mut xs = vec![0.0f32; n + 1];
+    for c in 0..n {
+        xs[c + 1] = xs[c] + pad_esq(c) + larg[c] + pad_dir(c);
+    }
+    let total = xs[n];
+    // O recuo da caixa em volta (`tcolorbox`): a tabela começa onde começa o texto dela.
+    let x0 = a.recuo_esq + if a.alinhamento == Alinhamento::Centro { ((limite - a.recuo_esq - a.recuo_dir - total) / 2.0).max(0.0) } else { 0.0 };
+    let fundo = |i: usize| if i >= 1 && ((i + 1) % 2 == 0) == a.marcado { a.fundo } else { 0 };
+    // Os fios de uma divisa, a partir de `y`: devolve o `y` depois deles.
+    let divisa = |k: usize, mut y: f32, deco: &mut Vec<Deco>| -> f32 {
+        let mut anterior_h = false;
+        for f in fios.get(k).copied().unwrap_or("").split(',').filter(|f| !f.is_empty()) {
+            let faixa = |f: &str| {
+                let (de, ate) = f[1..].split_once('-').unwrap_or((&f[1..], &f[1..]));
+                let (de, ate) = (de.trim().parse::<usize>().unwrap_or(1).max(1) - 1, ate.trim().parse::<usize>().unwrap_or(n).min(n));
+                (x0 + xs[de.min(n)], x0 + xs[ate.max(de + 1).min(n)])
+            };
+            let mut traco = |y: f32, e: f32, (x1, x2): (f32, f32)| deco.push(Deco::Traco { x1, y1: y + e / 2.0, x2, y2: y + e / 2.0, espessura: e, cor: COR_TEXTO });
+            match &f[..1] {
+                "T" => {
+                    traco(y, 0.08 * em, (x0, x0 + total));
+                    y += 0.08 * em + 0.65 * ex;
+                }
+                "M" => {
+                    y += 0.4 * ex;
+                    traco(y, 0.05 * em, (x0, x0 + total));
+                    y += 0.05 * em + 0.65 * ex;
+                }
+                "B" => {
+                    y += 0.4 * ex;
+                    traco(y, 0.08 * em, (x0, x0 + total));
+                    y += 0.08 * em;
+                }
+                "H" => {
+                    if anterior_h {
+                        y += 2.0; // \doublerulesep
+                    }
+                    traco(y, fio, (x0, x0 + total));
+                    y += fio;
+                }
+                "c" => {
+                    y += 0.4 * ex;
+                    // O `\cmidrule` sem `(lr)` vai de ponta a ponta das colunas.
+                    traco(y, 0.03 * em, faixa(f));
+                    y += 0.03 * em + 0.65 * ex;
+                }
+                // O `\cline` se sobrepõe à linha de cima: não ocupa espaço.
+                "C" => traco(y - fio, fio, faixa(f)),
+                _ => {}
+            }
+            anterior_h = f == "H";
+        }
+        y
+    };
+    let mut saida: Vec<Linha> = Vec::new();
+    for (i, l) in compostas.into_iter().enumerate() {
+        let mut linha = Linha::default();
+        let topo = divisa(i, 0.0, &mut linha.deco);
+        let base = topo + 0.7 * altura;
+        // A coluna `p` quebra o texto: a linha da tabela cresce de uma linha de texto por vez.
+        let alta = altura * l.iter().map(|(ls, _)| ls.len()).max().unwrap_or(1).max(1) as f32;
+        if fundo(i) != 0 {
+            linha.deco.insert(0, Deco::Retangulo { x: x0, y: topo, w: total, h: alta, cor: fundo(i) });
+        }
+        for (c, (ls, w)) in l.into_iter().enumerate() {
+            let regiao = mesclada(i, c);
+            if regiao.is_some_and(|m| m.coluna != c) {
+                linha.celulas.push(InfoCelula { x0: x0 + xs[c] + pad_esq(c), base, tam });
+                continue;
+            }
+            let (ini, fim) = regiao.map_or((c, c + 1), |m| (m.coluna, (m.coluna + m.colunas).min(n)));
+            let (esq, dir) = (x0 + xs[ini] + pad_esq(ini), x0 + xs[fim] - pad_dir(fim - 1));
+            let x = match (regiao.is_some(), alin.get(c).copied().unwrap_or('l')) {
+                (true, _) | (false, 'c') => esq + ((dir - esq) - w) / 2.0,
+                (false, 'r') => dir - w,
+                _ => esq,
+            };
+            linha.celulas.push(InfoCelula { x0: x, base, tam });
+            for (k, l) in ls.into_iter().enumerate() {
+                // A imagem da célula (o logo do `\multirow`): a mais alta que a linha começa no topo dela e
+                // desce por cima da de baixo.
+                for d in l.deco {
+                    if let Deco::Imagem { x: dx, y, w, h, origem } = d {
+                        linha.deco.push(Deco::Imagem { x: dx + x, y: (y - l.base + base + altura * k as f32).max(topo), w, h, origem });
+                    }
+                }
+                linha.notas.extend(l.notas.into_iter().map(|nota| NotaComposta { coluna: Some(c as u16), ..nota }));
+                linha.comentarios.extend(l.comentarios);
+                for mut p in l.pedacos {
+                    p.x += x;
+                    p.y = base + altura * k as f32;
+                    p.celula = Some(c as u16);
+                    linha.pedacos.push(p);
+                }
+            }
+        }
+        let mut fim = topo + alta;
+        // Os `|` atravessam a linha (e os `\hline` dela).
+        for (k, b) in barras.iter().enumerate().take(n + 1) {
+            // Dentro de uma célula mesclada o `|` não passa (o `\multicolumn` tem as colunas dele).
+            if mesclagens.iter().any(|m| m.linha == i && m.coluna < k && k < m.coluna + m.colunas) {
+                continue;
+            }
+            for j in 0..*b {
+                let x = x0 + xs[k] + if k == n { -(f32::from(j) * 2.0) } else { f32::from(j) * 2.0 };
+                linha.deco.push(Deco::Traco { x1: x, y1: 0.0, x2: x, y2: fim, espessura: fio, cor: COR_TEXTO });
+            }
+        }
+        if i + 1 == linhas.len() {
+            fim = divisa(i + 1, fim, &mut linha.deco);
+        }
+        linha.altura = fim;
+        saida.push(linha);
+    }
+    com_moldura(LayoutBloco { linhas: saida, antes: 4.0, depois: 10.0, minimo_antes: 1, minimo_depois: 1, ..LayoutBloco::default() }, limite, a)
+}
+
+/// A tabela dentro de uma caixa (`\fbox`, `tcolorbox`): a moldura em volta, como a dos parágrafos dela,
+/// e os espaços da caixa (sem eles as laterais se partem entre os blocos). O `fundo` da tabela é o das
+/// linhas alternadas, não o da caixa.
+fn com_moldura(mut lay: LayoutBloco, limite: f32, a: &Atrib) -> LayoutBloco {
+    if a.borda != 0 {
+        // O `\fboxsep` (3 pt) entre a moldura de cima e a primeira linha da tabela.
+        if a.borda & 4 != 0 && a.fundo == 0 {
+            acolchoar_em_cima(&mut lay, 3.0);
+        }
+        decorar(&mut lay.linhas, a.recuo_esq, (limite - a.recuo_esq - a.recuo_dir).max(1.0), &Atrib { fundo: 0, ..*a });
+        lay.antes = a.antes.unwrap_or(lay.antes);
+        lay.depois = a.depois.unwrap_or(lay.depois);
+    }
+    lay
 }
 
 /// Uma linha única que não se parte (imagem, equação, régua).
@@ -811,9 +1405,12 @@ fn imagem(origem: &str, legenda: &[Trecho], w: f32, h: f32, limite: f32) -> Layo
     let mut bloco = indivisivel(Linha { altura: h, deco, ..Linha::default() }, 6.0, 4.0);
     if !legenda.is_empty() {
         let mut texto = texto_corrido(legenda, 9.5, ITALICO, COR_CITACAO, 0.0, limite);
+        // A linha inteira no meio (cada pedaço sozinho no meio encavalaria "(a) " e o resto).
         for l in &mut texto {
+            let fim = l.pedacos.iter().map(|p| p.x + largura(&p.texto, p.estilo, p.tamanho)).fold(0.0, f32::max);
+            let desloc = ((limite - fim) / 2.0).max(0.0);
             for p in &mut l.pedacos {
-                p.x += ((limite - largura(&p.texto, p.estilo, p.tamanho)) / 2.0).max(0.0);
+                p.x += desloc;
             }
         }
         bloco.linhas.extend(texto);
@@ -871,7 +1468,11 @@ fn rotulos_da_equacao(f: &feather_math::Formula, numero: Option<&str>) -> Vec<(f
 
 /// A quebra de página aparece como uma linha discreta no fim da página; o que vem depois começa a seguinte.
 fn quebra_de_pagina(limite: f32) -> LayoutBloco {
-    let texto = "quebra de página";
+    marca_de_quebra("quebra de página", limite, true)
+}
+
+/// Uma quebra (de página, coluna ou seção): o nome no meio de um traço fino; `pagina` = o resto começa a página seguinte.
+fn marca_de_quebra(texto: &str, limite: f32, pagina: bool) -> LayoutBloco {
     let tamanho = 8.5;
     let altura = 16.0;
     let w = largura(texto, ITALICO, tamanho);
@@ -883,7 +1484,18 @@ fn quebra_de_pagina(limite: f32) -> LayoutBloco {
         Deco::Traco { x1: x + w + 6.0, y1: altura / 2.0, x2: limite, y2: altura / 2.0, espessura: 0.5, cor: COR_BORDA },
     ];
     let linha = Linha { altura, pedacos: vec![p], deco, x0: x, base, tam: tamanho, ..Linha::default() };
-    LayoutBloco { quebra_depois: true, ..indivisivel(linha, 2.0, 2.0) }
+    LayoutBloco { quebra_depois: pagina, so_na_tela: true, ..indivisivel(linha, 2.0, 2.0) }
+}
+
+/// A quebra de seção: como a de página, menos a contínua; a de página par ou ímpar ainda escolhe a paridade.
+fn quebra_de_secao(inicio: InicioDeSecao, limite: f32) -> LayoutBloco {
+    let (texto, paridade) = match inicio {
+        InicioDeSecao::ProximaPagina => ("quebra de seção (próxima página)", None),
+        InicioDeSecao::Continua => ("quebra de seção (contínua)", None),
+        InicioDeSecao::PaginaPar => ("quebra de seção (página par)", Some(true)),
+        InicioDeSecao::PaginaImpar => ("quebra de seção (página ímpar)", Some(false)),
+    };
+    LayoutBloco { pagina_par: paridade, ..marca_de_quebra(texto, limite, inicio != InicioDeSecao::Continua) }
 }
 
 /// A régua: na cor da borda do bloco (o `{\color{x}\hrule}` do LaTeX), ou cinza.
@@ -903,7 +1515,10 @@ pub struct EntradaSumario {
 
 /// O sumário: uma linha por título até `niveis`. A altura não depende do número da
 /// página (que sai só no quadro), então a paginação não precisa rodar duas vezes.
-pub fn sumario(entradas: &[EntradaSumario], niveis: u8, (numeros, pontilhado): (bool, bool), limite: f32, rotulo: &str) -> LayoutBloco {
+pub fn sumario(entradas: &[EntradaSumario], niveis: u8, (numeros, pontilhado, latex): (bool, bool, bool), limite: f32, rotulo: &str, secao: Option<&Estilo>) -> LayoutBloco {
+    if latex {
+        return sumario_latex(entradas, niveis, numeros, limite, rotulo, secao);
+    }
     let marcas = u8::from(numeros) | if numeros && pontilhado { 2 } else { 0 };
     let mut linhas = texto_corrido(&[Trecho::simples(rotulo)], 16.0, NEGRITO, COR_TEXTO, 0.0, limite);
     let altura = 18.0;
@@ -921,6 +1536,47 @@ pub fn sumario(entradas: &[EntradaSumario], niveis: u8, (numeros, pontilhado): (
     LayoutBloco { linhas, antes: 6.0, depois: 14.0, minimo_antes: 2, minimo_depois: 2, ..LayoutBloco::default() }
 }
 
+/// O `\tableofcontents` da classe `article` (11 pt): o título como um `\section*`, a seção em
+/// negrito, sem pontilhado e com 1 em antes; a subseção recuada 1,5 em, com o número numa coluna de
+/// 2,3 em e o pontilhado. A lista de figuras e a de tabelas são como a subseção.
+fn sumario_latex(entradas: &[EntradaSumario], niveis: u8, numeros: bool, limite: f32, rotulo: &str, secao: Option<&Estilo>) -> LayoutBloco {
+    let em = CORPO;
+    // O espaço de 2,3 ex depois do título.
+    let mut linhas = titulo_de_lista(rotulo, secao, (14.4, NEGRITO | SERIFA, 2.3 * 0.43 * em), limite);
+    let altura = 1.2 * em + 0.2;
+    for e in entradas.iter().filter(|e| e.nivel <= niveis) {
+        let (recuo, coluna) = match e.nivel {
+            1 => (0.0, 1.5 * em),
+            3 => (3.8 * em, 3.2 * em),
+            n if n >= 4 => (7.0 * em, 4.1 * em),
+            _ => (1.5 * em, 2.3 * em),
+        };
+        let secao = e.nivel == 1;
+        let estilo = SERIFA | if secao { NEGRITO } else { 0 };
+        // "1.2  Título" (sumário) ou "Figura 1 – Título" (listas): o número e o título separados.
+        let (numero, titulo) = match e.texto.split_once("  ") {
+            Some((n, t)) => (n.to_string(), t.to_string()),
+            None => match e.texto.split_once(" – ") {
+                Some((n, t)) => (n.rsplit(' ').next().unwrap_or("").to_string(), t.to_string()),
+                None => (String::new(), e.texto.clone()),
+            },
+        };
+        let antes = if secao { em } else { 0.0 };
+        let y = antes + linha_de_base(altura, CORPO);
+        let mut pedacos = Vec::new();
+        if !numero.is_empty() {
+            pedacos.push(Pedaco { x: recuo, y, texto: numero, estilo, tamanho: CORPO, cor: COR_TEXTO, ..Pedaco::default() });
+        }
+        let x = recuo + if pedacos.is_empty() { 0.0 } else { coluna };
+        let texto = cortar(&titulo, estilo, CORPO, limite - x - if numeros { 3.0 * em } else { 0.0 });
+        pedacos.push(Pedaco { x, y, texto, estilo, tamanho: CORPO, cor: COR_TEXTO, ..Pedaco::default() });
+        // 4 = no jeito do LaTeX (o pontilhado na cor do texto, o número da página no estilo da linha).
+        let marcas = u8::from(numeros) | if numeros && !secao { 2 } else { 0 } | 4;
+        linhas.push(Linha { altura: altura + antes, pedacos, alvo: Some(e.id), sumario: marcas, ..Linha::default() });
+    }
+    LayoutBloco { linhas, antes: 3.5 * 0.43 * em, depois: 14.0, minimo_antes: 2, minimo_depois: 2, ..LayoutBloco::default() }
+}
+
 /// Um parágrafo de uma lista gerada (referências, índice): o texto, os recuos e o espaço antes.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ParagrafoGerado {
@@ -931,11 +1587,26 @@ pub struct ParagrafoGerado {
 
 /// Uma lista gerada pelo motor (a bibliografia, o índice remissivo): o título e os parágrafos. Como o
 /// sumário, não se edita à mão — o cursor passa por cima dela inteira.
-pub fn lista_gerada(titulo: &str, paragrafos: &[ParagrafoGerado], limite: f32) -> LayoutBloco {
-    let mut linhas = texto_corrido(&[Trecho::simples(titulo)], 16.0, NEGRITO, COR_TEXTO, 0.0, limite);
-    if let Some(l) = linhas.last_mut() {
-        l.altura += 6.0;
+/// A lista com o `titulo` em cima (vazio = sem título).
+/// O título de uma lista gerada (sumário, referências, índice). No LaTeX ela é um `\section*`, então
+/// com `secao` (o estilo do título de nível 1 vindo do `\titleformat`) fica igual aos títulos.
+fn titulo_de_lista(titulo: &str, secao: Option<&Estilo>, (tamanho, bits, depois): (f32, u8, f32), limite: f32) -> Vec<Linha> {
+    if titulo.is_empty() {
+        return Vec::new();
     }
+    let (tamanho, bits, cor, depois) = match secao {
+        Some(e) => (e.tamanho, e.bits, if e.cor == 0 { COR_TEXTO } else { e.cor }, e.depois.unwrap_or(depois)),
+        None => (tamanho, bits, COR_TEXTO, depois),
+    };
+    let mut linhas = texto_corrido(&[Trecho::simples(titulo)], tamanho, bits, cor, 0.0, limite);
+    if let Some(l) = linhas.last_mut() {
+        l.altura += depois;
+    }
+    linhas
+}
+
+pub fn lista_gerada(titulo: &str, secao: Option<&Estilo>, paragrafos: &[ParagrafoGerado], limite: f32) -> LayoutBloco {
+    let mut linhas = titulo_de_lista(titulo, secao, (16.0, NEGRITO, 6.0), limite);
     for p in paragrafos {
         let mut ls = texto_formatado(&p.texto, &Base::novo(CORPO, 0, COR_TEXTO, 0.0, limite), &p.atrib);
         if let Some(l) = ls.first_mut() {
@@ -1004,6 +1675,7 @@ pub fn compor_em_mesclada(
     mesclagens: &[MesclagemTabela],
 ) -> LayoutBloco {
     let mut lay = compor_bloco(c, a, limite, en, mesclagens);
+    lay.encher = a.encher;
     if matches!(c, Conteudo::Titulo { .. } | Conteudo::Paragrafo { .. } | Conteudo::Item { .. } | Conteudo::Citacao { .. } | Conteudo::Regua) {
         lay.antes = a.antes.unwrap_or(lay.antes);
         lay.depois = a.depois.unwrap_or(lay.depois);
@@ -1018,11 +1690,14 @@ fn compor_bloco(c: &Conteudo, a: &Atrib, limite: f32, en: &Entorno, mesclagens: 
         Conteudo::Item { nivel, texto, .. } => item(*nivel, texto, limite, a),
         Conteudo::Citacao { texto } => citacao(texto, limite, a),
         Conteudo::Codigo { codigo: fonte, .. } => codigo(fonte, limite),
-        Conteudo::Tabela { cabecalho, linhas } => tabela(*cabecalho, linhas, limite, mesclagens),
+        Conteudo::Tabela { cabecalho, linhas } => tabela(*cabecalho, linhas, limite, mesclagens, a),
         Conteudo::Imagem { origem, legenda, largura, altura } => imagem(origem, legenda, *largura, *altura, limite),
         Conteudo::Equacao { latex } => equacao(latex, limite, en.numero),
         Conteudo::Regua => regua(limite, a),
         Conteudo::QuebraDePagina => quebra_de_pagina(limite),
+        // shortcut: o documento tem uma coluna só, então a quebra de coluna leva à página seguinte (como no Word); trocar quando houver colunas.
+        Conteudo::QuebraDeColuna => marca_de_quebra("quebra de coluna", limite, true),
+        Conteudo::QuebraDeSecao { inicio } => quebra_de_secao(*inicio, limite),
         Conteudo::Sumario { .. } | Conteudo::Bibliografia { .. } | Conteudo::IndiceRemissivo => LayoutBloco::default(),
     }
 }
@@ -1036,6 +1711,18 @@ mod testes {
     }
 
     #[test]
+    fn imagem_no_meio_da_linha_ocupa_a_largura_e_sobe_a_linha() {
+        let imagem = Trecho::objeto(Objeto::Imagem { origem: "x.svg".into(), largura: 10.0, altura: 30.0 });
+        let l = compor(&Conteudo::Paragrafo { texto: vec![Trecho::simples("A "), imagem, Trecho::simples(" B")] }, &Atrib::default(), 200.0);
+        let linha = &l.linhas[0];
+        let Some(Deco::Imagem { x, y, w, h, .. }) = linha.deco.first() else { panic!("{linha:?}") };
+        assert_eq!((*w, *h), (10.0, 30.0));
+        assert!((y + h - linha.base).abs() < 0.01 && *y >= 0.0, "em pé na linha de base, dentro da linha");
+        let b = linha.pedacos.iter().find(|p| p.texto.contains('B')).unwrap();
+        assert!(b.x >= x + w, "o texto depois vem depois da imagem");
+    }
+
+    #[test]
     fn tabulacao_encosta_o_resto_na_direita_e_desce_inteira_se_nao_cabe() {
         let l = par("Curso\tJan 2020 – Dez 2024");
         assert_eq!(l.linhas.len(), 1);
@@ -1044,6 +1731,53 @@ mod testes {
         let l = par(&format!("{}\tJan 2020 – Dez 2024", "palavra ".repeat(3)));
         assert_eq!(l.linhas.len(), 2, "a data desce inteira");
         assert_eq!(l.linhas[1].pedacos.iter().map(|p| p.texto.as_str()).collect::<String>(), "Jan 2020 – Dez 2024");
+    }
+
+    #[test]
+    fn justificado_parte_a_palavra_com_hifen_desenhado_fora_do_texto() {
+        let texto = "Uma linha com espaço sobrando e desenvolvimento";
+        let limite = largura("Uma linha com espaço sobrando e desenvol-", 0, CORPO) + 1.0;
+        let a = Atrib { alinhamento: Alinhamento::Justificado, ..Atrib::default() };
+        let l = compor(&Conteudo::Paragrafo { texto: vec![Trecho::simples(texto)] }, &a, limite);
+        assert_eq!(l.linhas.len(), 2);
+        assert!(matches!(&l.linhas[0].deco[..], [Deco::Texto { texto, .. }] if texto == "-"), "{:?}", l.linhas[0].deco);
+        // O texto do parágrafo não ganha o hífen: o cursor e o arquivo não mudam.
+        let tudo: String = l.linhas.iter().flat_map(|l| &l.pedacos).map(|p| p.texto.as_str()).collect();
+        assert_eq!(tudo.replace(' ', ""), texto.replace(' ', ""));
+        // Alinhado à esquerda não parte.
+        let l = compor(&Conteudo::Paragrafo { texto: vec![Trecho::simples(texto)] }, &Atrib::default(), limite);
+        assert!(l.linhas[0].deco.is_empty());
+    }
+
+    #[test]
+    fn quebra_do_tex_no_paragrafo_inteiro_cabe_e_nao_perde_texto() {
+        let texto = "Essa unidade curricular será ministrada com aulas expositivas-dialogadas e práticas em laboratório sob a supervisão do professor. As atividades empregarão a metodologia de aprendizado baseado em projetos, em que desafios são lançados e o docente orienta os estudantes.\u{2028}Depois da quebra.";
+        let texto = texto.replace('\u{2028}', &QUEBRA_DE_LINHA.to_string());
+        let a = Atrib { alinhamento: Alinhamento::Justificado, ..Atrib::default() };
+        composicao_tex(true);
+        let l = compor(&Conteudo::Paragrafo { texto: vec![Trecho::simples(&texto)] }, &a, 300.0);
+        composicao_tex(false);
+        assert!(l.linhas.len() > 3);
+        for linha in &l.linhas {
+            let p = linha.pedacos.iter().rev().find(|p| !p.texto.trim().is_empty()).unwrap();
+            assert!(p.x + largura(&p.texto, p.estilo, p.tamanho) <= 300.01, "{p:?}");
+        }
+        assert!(l.linhas.last().unwrap().pedacos.iter().any(|p| p.texto.contains("Depois")), "a quebra forçada abre a última linha");
+        let tudo: String = l.linhas.iter().flat_map(|l| &l.pedacos).map(|p| p.texto.as_str()).collect();
+        assert_eq!(tudo.replace([' ', QUEBRA_DE_LINHA], ""), texto.replace([' ', QUEBRA_DE_LINHA], ""));
+    }
+
+    #[test]
+    fn justificado_encolhe_os_espacos_para_caber_mais_uma_palavra_sem_estourar() {
+        let a = Atrib { alinhamento: Alinhamento::Justificado, ..Atrib::default() };
+        // Cabe "um dois três" só com os espaços encolhidos.
+        let limite = largura("um dois três", 0, CORPO) - largura(" ", 0, CORPO) * 0.5;
+        for texto in ["um dois três", "um dois três quatro"] {
+            let l = compor(&Conteudo::Paragrafo { texto: vec![Trecho::simples(texto)] }, &a, limite);
+            assert_eq!(l.linhas[0].pedacos.iter().map(|p| p.texto.trim()).filter(|t| !t.is_empty()).collect::<Vec<_>>(), ["um", "dois", "três"]);
+            let p = l.linhas[0].pedacos.last().unwrap();
+            assert!(p.x + largura(&p.texto, p.estilo, p.tamanho) <= limite + 0.01, "{p:?}");
+        }
     }
 
     #[test]
@@ -1111,8 +1845,35 @@ mod testes {
     }
 
     #[test]
+    fn tabela_do_latex_tem_os_fios_e_a_largura_do_texto() {
+        let c = |t: &str| vec![Trecho::simples(t)];
+        let linhas = vec![vec![c("Item"), c("Qtd.")], vec![c("Inversor"), c("1")]];
+        let a = Atrib { alinhamento: Alinhamento::Centro, ..Atrib::default() };
+        let t = tabela_latex(&linhas, "@{}lr@{}\nT;M;B", 400.0, &[], &a);
+        // Três fios (o de cima e o do meio na 1ª linha, o de baixo na última), nenhum `|`.
+        let fios: Vec<_> = t.linhas.iter().flat_map(|l| &l.deco).filter(|d| matches!(d, Deco::Traco { .. })).collect();
+        assert_eq!(fios.len(), 3);
+        // Sem `@{}` nas pontas: o texto encosta no fio; a tabela é mais estreita que a página, no meio.
+        let Deco::Traco { x1, x2, .. } = fios[0] else { unreachable!() };
+        assert!(*x1 > 0.0 && (x1 + x2 - 400.0).abs() < 0.01 && x2 - x1 < 200.0);
+        assert!((t.linhas[1].pedacos[0].x - x1).abs() < 0.01);
+        // A coluna `r`: o "1" acaba no fim da tabela.
+        let um = &t.linhas[1].pedacos[1];
+        assert!((um.x + largura("1", um.estilo, um.tamanho) - x2).abs() < 0.01);
+        assert_eq!(colunas_latex("|l|c|c|c|").2, vec![1, 1, 1, 1, 1]);
+        // `p{3cm}`: a coluna tem 3 cm e o texto quebra nela.
+        assert_eq!(colunas_latex("p{3cm}l").1, vec![Some(3.0 * 28.3465), None]);
+        let t = tabela_latex(&[vec![c("palavra palavra palavra palavra palavra"), c("x")]], "p{2cm}l\n;", 400.0, &[], &Atrib::default());
+        assert!(t.linhas[0].pedacos.iter().map(|p| p.y).fold(0.0, f32::max) > 13.6);
+    }
+
+    #[test]
     fn sumario_tem_uma_linha_por_titulo() {
         let e = vec![EntradaSumario { id: 1, nivel: 1, texto: "A".into() }, EntradaSumario { id: 2, nivel: 3, texto: "B".into() }];
-        assert_eq!(sumario(&e, 2, (true, true), 300.0, "Sumário").linhas.len(), 2);
+        assert_eq!(sumario(&e, 2, (true, true, false), 300.0, "Sumário", None).linhas.len(), 2);
+        // No jeito do LaTeX: o número e o título em pedaços separados, o título na coluna dele.
+        let l = sumario_latex(&[EntradaSumario { id: 1, nivel: 2, texto: "2.1  Irradiação".into() }], 3, true, 300.0, "Sumário", None).linhas;
+        assert_eq!((l[1].pedacos[0].texto.as_str(), l[1].pedacos[1].x), ("2.1", 1.5 * CORPO + 2.3 * CORPO));
+        assert_eq!(l[1].sumario, 1 | 2 | 4);
     }
 }

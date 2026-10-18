@@ -54,7 +54,8 @@ impl Sessao {
 
     /// Os parágrafos da lista de referências, com o recuo de cada estilo (o pendente da APA e da
     /// Chicago, o número para fora nos numéricos).
-    pub(crate) fn paragrafos_da_bibliografia(&self, todas: bool) -> Vec<ParagrafoGerado> {
+    /// `palavra`: só as fontes com essa palavra-chave (o `\printbibliography[keyword=…]`).
+    pub(crate) fn paragrafos_da_bibliografia(&self, todas: bool, palavra: Option<&str>) -> Vec<ParagrafoGerado> {
         let b = &self.doc.bibliografia;
         let recuo = match b.estilo {
             EstiloDeCitacao::Apa | EstiloDeCitacao::Chicago => 36.0,
@@ -62,7 +63,15 @@ impl Sessao {
             EstiloDeCitacao::Abnt => 0.0,
         };
         let atrib = Atrib { recuo_esq: recuo, primeira: -recuo, entrelinha: 1.0, ..Atrib::default() };
-        lista(b.estilo, &b.fontes, &chaves_citadas(&self.doc.blocos), todas).into_iter().map(|texto| ParagrafoGerado { texto, atrib, antes: 8.0 }).collect()
+        let fontes: Vec<Fonte> = b.fontes.iter().filter(|f| palavra.is_none_or(|p| f.palavras.split(',').any(|x| x.trim() == p))).cloned().collect();
+        // A NBR 6023 separa as referências por uma linha em branco (o `\bibitemsep` do biblatex-abnt),
+        // que não vai antes da primeira.
+        let abnt = b.estilo == EstiloDeCitacao::Abnt;
+        lista(b.estilo, &fontes, &chaves_citadas(&self.doc.blocos), todas, b.sem_sl_sn)
+            .into_iter()
+            .enumerate()
+            .map(|(k, texto)| ParagrafoGerado { texto, atrib, antes: if !abnt { 8.0 } else if k == 0 { 0.0 } else { 13.0 } })
+            .collect()
     }
 
     /// Cadastra uma fonte nova ou troca a de chave `antiga` (vazia = nova). Mudar a chave muda também
@@ -205,14 +214,28 @@ mod testes {
         s.citacao_inserir(&["silva2023".into()], "4").unwrap();
         ir(&mut s, 1, 7);
         s.citacao_inserir(&["lima2020".into(), "silva2023".into()], "").unwrap();
-        assert_eq!(rotulos(&s), ["(SILVA, 2023, p. 4)", "(LIMA, 2020; SILVA, 2023)"]);
+        assert_eq!(rotulos(&s), ["(Silva, 2023, p. 4)", "(Lima, 2020; Silva, 2023)"]);
         s.estilo_citacao_definir("ieee").unwrap();
         assert_eq!(rotulos(&s), ["[1, p. 4]", "[2], [1]"]);
         s.bibliografia_inserir(false);
-        let refs = s.paragrafos_da_bibliografia(false);
+        let refs = s.paragrafos_da_bibliografia(false, None);
         assert!(texto_puro(&refs[0].texto).starts_with("[1] A. Silva"));
         assert!(s.citacao_inserir(&["nao_existe".into()], "").is_err());
         assert!(s.estilo_citacao_definir("mla").is_err());
+    }
+
+    #[test]
+    fn lista_filtrada_pela_palavra_chave() {
+        let mut s = sessao();
+        let mut f = s.bibliografia().fontes[1].clone();
+        f.palavras = "basica, extra".into();
+        let chave = f.chave.clone();
+        s.fonte_salvar(f, &chave).unwrap();
+        let so = |s: &Sessao, p| s.paragrafos_da_bibliografia(true, p).iter().map(|r| texto_puro(&r.texto)).collect::<Vec<_>>();
+        assert_eq!(so(&s, None).len(), 2);
+        let basica = so(&s, Some("basica"));
+        assert!(basica.len() == 1 && basica[0].contains(&chave[..4].to_uppercase()), "{basica:?}");
+        assert!(so(&s, Some("complementar")).is_empty());
     }
 
     #[test]

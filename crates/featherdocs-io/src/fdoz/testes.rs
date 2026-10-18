@@ -29,9 +29,11 @@ fn todo_tipo_de_bloco_volta_igual() {
         Conteudo::Imagem { origem: png, legenda: analisar("A *legenda*"), largura: 120.0, altura: 80.0 },
         Conteudo::Imagem { origem: "https://x.org/a.jpg".into(), legenda: Vec::new(), largura: 0.0, altura: 0.0 },
         Conteudo::Equacao { latex: "\\frac{a}{b}".into() },
-        Conteudo::Sumario { niveis: 4, sem_numeros: true, sem_pontilhado: true, lista: 2 },
+        Conteudo::Sumario { niveis: 4, sem_numeros: true, sem_pontilhado: true, lista: 2, latex: true },
         Conteudo::Regua,
         Conteudo::QuebraDePagina,
+        Conteudo::QuebraDeColuna,
+        Conteudo::QuebraDeSecao { inicio: featherdocs_core::modelo::InicioDeSecao::PaginaImpar },
     ] {
         d.acrescentar(c);
     }
@@ -61,6 +63,8 @@ fn formatacao_rica_sobrevive_ao_arquivo() {
         sem_numero: false,
         legenda: 2,
         cor_marcador: 0x2e6d_a4ff,
+        apendice: true,
+        encher: true,
     };
     assert_eq!(ler(&gravar(&d).unwrap()).unwrap(), d);
 }
@@ -71,9 +75,12 @@ fn pagina_estilos_e_marcadores_sobrevivem_ao_arquivo() {
     d.meta = Meta { titulo: "Relatório".into(), autor: "Ana".into() };
     d.pagina = ConfigPagina { largura: 612.0, altura: 792.0, margem_sup: 36.85, margem_dir: 48.0, margem_inf: 36.85, margem_esq: 48.0 };
     d.extras = Extras {
-        cabecalho: Faixas { esquerda: "{titulo}".into(), centro: String::new(), direita: "{autor}".into() },
+        cabecalho: Faixas { esquerda: "{titulo}".into(), centro: String::new(), direita: "{autor}".into(), fio: 0.4, estilo: 64, tamanho: 10.0, cor: 0x112233ff, ..Faixas::default() },
         rodape: Faixas::default(),
         primeira_diferente: true,
+        // A primeira página com o logo em cima e "página 1 de 2" embaixo.
+        cabecalho_primeira: Faixas { imagem: "data:image/png;base64,iVBO".into(), imagem_largura: 590.5, imagem_altura: 64.25, ..Faixas::default() },
+        rodape_primeira: Faixas { direita: "página {pagina} de {total}".into(), tamanho: 8.0, ..Faixas::default() },
         cor_pagina: 0xfff8_e7ff,
         marca: "RASCUNHO".into(),
         marca_cor: 0xcccc_ccff,
@@ -86,6 +93,7 @@ fn pagina_estilos_e_marcadores_sobrevivem_ao_arquivo() {
         formato_notas_fim: 0,
         controlar_alteracoes: false,
         protegido: false,
+        composicao_tex: true,
     };
     d.estilos.numeracao = Numeracao::Capitulo;
     d.estilos.lista.push(Estilo { id: 1, nome: "Capa".into(), base: 1, bits: NEGRITO, tamanho: 30.0, cor: 0x3366_99ff, alinhamento: Alinhamento::Centro, antes: Some(0.0), depois: None, entrelinha: 1.0 });
@@ -177,4 +185,18 @@ fn sugestoes_comentarios_e_modos_voltam_iguais() {
     d.acrescentar(Conteudo::Paragrafo { texto });
     d.comentarios.push(Comentario { id: 7, autor: "Ana".into(), quando: "06/10/2026".into(), texto: "Veja".into(), resolvido: true, respostas: vec![Resposta { autor: "Bia".into(), quando: String::new(), texto: "Ok".into() }] });
     assert_eq!(ler(&gravar(&d).unwrap()).unwrap(), d);
+}
+
+#[test]
+fn parte_que_estoura_ao_descompactar_e_recusada() {
+    // 2 MiB de zeros viram poucos KiB no ZIP; o teto (1 MiB nos testes) vale para o descompactado.
+    let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    zip.start_file("bomba", zip::write::SimpleFileOptions::default()).unwrap();
+    std::io::Write::write_all(&mut zip, &vec![0u8; 2 << 20]).unwrap();
+    zip.start_file("pequena", zip::write::SimpleFileOptions::default()).unwrap();
+    std::io::Write::write_all(&mut zip, b"ok").unwrap();
+    let bytes = zip.finish().unwrap().into_inner();
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(bytes.as_slice())).unwrap();
+    assert!(super::ler_parte(&mut z, "bomba").unwrap_err().contains("MiB"));
+    assert_eq!(super::ler_parte(&mut z, "pequena").unwrap(), b"ok");
 }

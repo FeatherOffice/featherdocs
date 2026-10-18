@@ -4,10 +4,6 @@ target/
 target-agentes/
 dist/
 
-# Interface web antiga (Tauri/TypeScript)
-node_modules/
-src-tauri/gen/
-
 # Planilhas grandes de teste geradas localmente
 planilha_*.csv
 

@@ -18,14 +18,14 @@
 //! fase de testes) não abre mais — o mesmo corte que o FeatherSheet fez com o `.oplz`.
 
 use std::collections::HashMap;
-use std::io::{Cursor, Read, Write};
+use std::io::{Cursor, Write};
 use std::sync::Arc;
 
 use arrow::array::{Array, ArrayRef, BooleanArray, Float32Array, Int8Array, RecordBatch, StringArray, UInt32Array, UInt64Array, UInt8Array};
 use arrow::datatypes::{Field, Schema};
 use arrow::ipc::reader::FileReader;
 use arrow::ipc::writer::FileWriter;
-use featherdocs_core::modelo::{Alinhamento, Atrib, Autor, Bloco, Comentario, Resposta, Revisao, TipoDeRevisao, EstiloDeCitacao, Fonte, TipoDeFonte, Celula, ConfigPagina, Conteudo, Documento, MesclagemTabela, Estilo, Estilos, Extras, Faixas, Fmt, Lista, Marca, Marcador, Meta, Numeracao, NumeracaoDeLinhas, Trecho, Vertical};
+use featherdocs_core::modelo::{Alinhamento, Atrib, Autor, Bloco, Comentario, Resposta, Revisao, TipoDeRevisao, EstiloDeCitacao, Fonte, TipoDeFonte, Celula, ConfigPagina, Conteudo, Documento, MesclagemTabela, Estilo, Estilos, Extras, Faixas, Fmt, InicioDeSecao, Lista, Marca, Marcador, Meta, Numeracao, NumeracaoDeLinhas, Trecho, Vertical};
 use zip::write::SimpleFileOptions;
 
 use crate::base64;
@@ -43,7 +43,7 @@ fn erro(e: &dyn std::fmt::Display) -> String {
 // ---------------------------------------------------------------------------
 
 const ALINHAMENTOS: [Alinhamento; 4] = [Alinhamento::Esquerda, Alinhamento::Centro, Alinhamento::Direita, Alinhamento::Justificado];
-const LISTAS: [Lista; 8] = [Lista::Padrao, Lista::Circulo, Lista::Quadrado, Lista::Seta, Lista::Tarefa, Lista::Numerica, Lista::Alfabetica, Lista::Romana];
+const LISTAS: [Lista; 9] = [Lista::Padrao, Lista::Circulo, Lista::Quadrado, Lista::Seta, Lista::Tarefa, Lista::Numerica, Lista::Alfabetica, Lista::Romana, Lista::RomanaMinuscula];
 const VERTICAIS: [Vertical; 3] = [Vertical::Topo, Vertical::Centro, Vertical::Base];
 const LINHAS_NUMERADAS: [NumeracaoDeLinhas; 3] = [NumeracaoDeLinhas::Nenhuma, NumeracaoDeLinhas::Continua, NumeracaoDeLinhas::PorPagina];
 const NUMERACOES: [Numeracao; 3] = [Numeracao::Nenhuma, Numeracao::Decimal, Numeracao::Capitulo];
@@ -77,6 +77,8 @@ fn tipo_do_bloco(c: &Conteudo) -> u8 {
         Conteudo::QuebraDePagina => 10,
         Conteudo::Bibliografia { .. } => 11,
         Conteudo::IndiceRemissivo => 12,
+        Conteudo::QuebraDeColuna => 13,
+        Conteudo::QuebraDeSecao { .. } => 14,
     }
 }
 
@@ -191,6 +193,15 @@ fn documento_arrow(doc: &Documento) -> Result<Vec<u8>, String> {
             ("rodape_esq", texto(&x.rodape.esquerda)),
             ("rodape_centro", texto(&x.rodape.centro)),
             ("rodape_dir", texto(&x.rodape.direita)),
+            ("faixas_fmt", texto(&[&x.cabecalho, &x.rodape, &x.cabecalho_primeira, &x.rodape_primeira].map(|f| format!("{} {} {} {:x}", f.fio, f.estilo, f.tamanho, f.cor)).join(";"))),
+            ("cabecalho1_esq", texto(&x.cabecalho_primeira.esquerda)),
+            ("cabecalho1_centro", texto(&x.cabecalho_primeira.centro)),
+            ("cabecalho1_dir", texto(&x.cabecalho_primeira.direita)),
+            ("rodape1_esq", texto(&x.rodape_primeira.esquerda)),
+            ("rodape1_centro", texto(&x.rodape_primeira.centro)),
+            ("rodape1_dir", texto(&x.rodape_primeira.direita)),
+            // As imagens das quatro faixas, na mesma ordem do `faixas_fmt`, separadas por linha.
+            ("faixas_imagens", texto(&[&x.cabecalho, &x.rodape, &x.cabecalho_primeira, &x.rodape_primeira].map(|f| format!("{} {} {}", f.imagem_largura, f.imagem_altura, f.imagem)).join("\n"))),
             ("primeira_diferente", Arc::new(BooleanArray::from(vec![x.primeira_diferente]))),
             ("cor_pagina", u32_(x.cor_pagina)),
             ("marca", texto(&x.marca)),
@@ -206,6 +217,8 @@ fn documento_arrow(doc: &Documento) -> Result<Vec<u8>, String> {
             ("estilo_citacao", u8_(codigo_de(&ESTILOS_DE_CITACAO, &doc.bibliografia.estilo))),
             ("controlar_alteracoes", Arc::new(BooleanArray::from(vec![x.controlar_alteracoes]))),
             ("protegido", Arc::new(BooleanArray::from(vec![x.protegido]))),
+            ("composicao_tex", Arc::new(BooleanArray::from(vec![x.composicao_tex]))),
+            ("sem_sl_sn", Arc::new(BooleanArray::from(vec![doc.bibliografia.sem_sl_sn]))),
         ],
         meta,
     )
@@ -229,6 +242,7 @@ struct ColunasDeBloco {
     /// No sumário, 0 = títulos, 1 = figuras, 2 = tabelas.
     lista_sumario: Vec<u8>,
     mesclagens: Vec<String>,
+    latex: Vec<String>,
     a: ColunasDeAtrib,
 }
 
@@ -251,6 +265,8 @@ struct ColunasDeAtrib {
     sem_numero: Vec<bool>,
     legenda: Vec<u8>,
     cor_marcador: Vec<u32>,
+    apendice: Vec<bool>,
+    encher: Vec<bool>,
 }
 
 impl ColunasDeAtrib {
@@ -272,6 +288,8 @@ impl ColunasDeAtrib {
         self.sem_numero.push(a.sem_numero);
         self.legenda.push(a.legenda);
         self.cor_marcador.push(a.cor_marcador);
+        self.apendice.push(a.apendice);
+        self.encher.push(a.encher);
     }
 
     fn colunas(self) -> Vec<(&'static str, ArrayRef)> {
@@ -293,6 +311,8 @@ impl ColunasDeAtrib {
             ("sem_numero", Arc::new(BooleanArray::from(self.sem_numero))),
             ("legenda", Arc::new(UInt8Array::from(self.legenda))),
             ("cor_marcador", Arc::new(UInt32Array::from(self.cor_marcador))),
+            ("apendice", Arc::new(BooleanArray::from(self.apendice))),
+            ("encher", Arc::new(BooleanArray::from(self.encher))),
         ]
     }
 }
@@ -338,12 +358,14 @@ impl ColunasDeBloco {
         let (mut largura, mut altura, mut marca_a, mut marca_b, mut lista_sumario) = (0.0, 0.0, false, false, 0);
         match &b.conteudo {
             Conteudo::Titulo { nivel: n, .. } => nivel = *n,
+            Conteudo::QuebraDeSecao { inicio } => nivel = *inicio as u8,
             Conteudo::Item { ordenado: o, nivel: n, .. } => (ordenado, nivel) = (*o, *n),
             Conteudo::Codigo { linguagem: l, codigo } => (fonte, linguagem) = (Some(codigo.clone()), Some(l.clone())),
             Conteudo::Tabela { cabecalho, .. } => marca_a = *cabecalho,
             Conteudo::Imagem { origem, largura: w, altura: h, .. } => (fonte, largura, altura) = (Some(Self::origem(origem, imagens)), *w, *h),
             Conteudo::Equacao { latex } => fonte = Some(latex.clone()),
-            Conteudo::Sumario { niveis, sem_numeros, sem_pontilhado, lista } => (nivel, marca_a, marca_b, lista_sumario) = (*niveis, *sem_numeros, *sem_pontilhado, *lista),
+            // O estilo do LaTeX vai no bit de cima do número da lista (a coluna já existe).
+            Conteudo::Sumario { niveis, sem_numeros, sem_pontilhado, lista, latex } => (nivel, marca_a, marca_b, lista_sumario) = (*niveis, *sem_numeros, *sem_pontilhado, *lista | if *latex { 0x80 } else { 0 }),
             Conteudo::Bibliografia { todas } => marca_a = *todas,
             _ => {}
         }
@@ -361,6 +383,7 @@ impl ColunasDeBloco {
         self.mesclagens.push(b.mesclagens.iter()
             .map(|m| format!("{},{},{}", m.linha, m.coluna, m.colunas))
             .collect::<Vec<_>>().join(";"));
+        self.latex.push(b.latex.clone());
         self.a.por(&b.atrib);
     }
 }
@@ -383,6 +406,7 @@ fn blocos_arrow(blocos: &[Bloco], imagens: &mut Vec<(String, Vec<u8>)>) -> Resul
         ("marca_b", Arc::new(BooleanArray::from(c.marca_b))),
         ("lista_sumario", Arc::new(UInt8Array::from(c.lista_sumario))),
         ("mesclagens", Arc::new(StringArray::from(c.mesclagens))),
+        ("latex", Arc::new(StringArray::from(c.latex))),
     ];
     colunas.extend(c.a.colunas());
     tabela(colunas, HashMap::new())
@@ -403,6 +427,7 @@ fn tipo_da_marca(m: &Marca) -> u8 {
         Marca::Indice { .. } => 3,
         Marca::Campo { .. } => 4,
         Marca::Comentario { .. } => 5,
+        Marca::Imagem { .. } => 6,
     }
 }
 
@@ -417,6 +442,7 @@ fn partes_da_marca(m: &Marca) -> (Option<String>, Option<String>, bool) {
         Marca::Indice { termo, sub } => (Some(termo.clone()), Some(sub.clone()), false),
         Marca::Campo { campo } => (Some(campo.clone()), None, false),
         Marca::Comentario { id, fim } => (Some(id.to_string()), None, *fim),
+        Marca::Imagem { origem, largura, altura } => (Some(origem.clone()), Some(format!("{largura} {altura}")), false),
     }
 }
 
@@ -427,6 +453,10 @@ fn marca_das_partes(tipo: u8, a: String, b: String, fim: bool) -> Option<Marca> 
         3 => Marca::Indice { termo: a, sub: b },
         4 => Marca::Campo { campo: a },
         5 => Marca::Comentario { id: a.parse().unwrap_or(0), fim },
+        6 => {
+            let (w, h) = b.split_once(' ').unwrap_or(("0", "0"));
+            Marca::Imagem { origem: a, largura: w.parse().unwrap_or(0.0), altura: h.parse().unwrap_or(0.0) }
+        }
         _ => return None,
     })
 }
@@ -593,10 +623,8 @@ fn marcadores_arrow(m: &[Marcador]) -> Result<Vec<u8>, String> {
 // ---------------------------------------------------------------------------
 
 fn ler_parte(zip: &mut zip::ZipArchive<Cursor<&[u8]>>, nome: &str) -> Result<Vec<u8>, String> {
-    let mut f = zip.by_name(nome).map_err(|_| format!("O .fdoz está incompleto: falta \"{nome}\"."))?;
-    let mut v = Vec::new();
-    f.read_to_end(&mut v).map_err(|e| format!("Não consegui ler \"{nome}\" do .fdoz: {e}"))?;
-    Ok(v)
+    let f = zip.by_name(nome).map_err(|_| format!("O .fdoz está incompleto: falta \"{nome}\"."))?;
+    crate::ler_limitado(f).map_err(|e| format!("Não consegui ler \"{nome}\" do .fdoz: {e}"))
 }
 
 /// Lê um `.fdoz`.
@@ -666,6 +694,29 @@ pub fn ler(bytes: &[u8]) -> Result<Documento, String> {
     Ok(doc)
 }
 
+/// O fio e a letra da faixa `k` (0 cabeçalho, 1 rodapé) da coluna `faixas_fmt` ("fio estilo tamanho cor;…"),
+/// que o `.fdoz` anterior a 18/10/2026 não tem.
+/// A imagem `k` da coluna `faixas_imagens` ("largura altura origem" por linha).
+fn com_imagem(mut f: Faixas, imagens: &str, k: usize) -> Faixas {
+    if let Some(linha) = imagens.lines().nth(k) {
+        let mut partes = linha.splitn(3, ' ');
+        f.imagem_largura = partes.next().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+        f.imagem_altura = partes.next().and_then(|v| v.parse().ok()).unwrap_or(0.0);
+        f.imagem = partes.next().unwrap_or("").to_string();
+    }
+    f
+}
+
+fn com_fmt(mut f: Faixas, fmt: &str, k: usize) -> Faixas {
+    if let Some([fio, estilo, tamanho, cor]) = fmt.split(';').nth(k).map(|p| p.split(' ').collect::<Vec<_>>()).and_then(|v| <[&str; 4]>::try_from(v).ok()) {
+        f.fio = fio.parse().unwrap_or(0.0);
+        f.estilo = estilo.parse().unwrap_or(0);
+        f.tamanho = tamanho.parse().unwrap_or(0.0);
+        f.cor = u32::from_str_radix(cor, 16).unwrap_or(0);
+    }
+    f
+}
+
 fn ler_documento(t: &Lida) -> Result<Documento, String> {
     if t.linhas() != 1 {
         return Err("documento.arrow tem que ter uma linha.".into());
@@ -675,9 +726,15 @@ fn ler_documento(t: &Lida) -> Result<Documento, String> {
     let u = |c: &str| t.col::<UInt32Array>(c).map(|a| a.value(0));
     let b8 = |c: &str| t.col::<UInt8Array>(c).map(|a| a.value(0));
     let pagina = ConfigPagina { largura: f("largura")?, altura: f("altura")?, margem_sup: f("margem_sup")?, margem_dir: f("margem_dir")?, margem_inf: f("margem_inf")?, margem_esq: f("margem_esq")? };
+    let (fmt, imagens) = (s("faixas_fmt").unwrap_or_default(), s("faixas_imagens").unwrap_or_default());
+    // As colunas da primeira página vieram depois: faltando, ficam vazias.
+    let s0 = |c: &str| s(c).unwrap_or_default();
+    let faixa = |esq: String, centro: String, dir: String, k: usize| com_imagem(com_fmt(Faixas { esquerda: esq, centro, direita: dir, ..Faixas::default() }, &fmt, k), &imagens, k);
     let extras = Extras {
-        cabecalho: Faixas { esquerda: s("cabecalho_esq")?, centro: s("cabecalho_centro")?, direita: s("cabecalho_dir")? },
-        rodape: Faixas { esquerda: s("rodape_esq")?, centro: s("rodape_centro")?, direita: s("rodape_dir")? },
+        cabecalho: faixa(s("cabecalho_esq")?, s("cabecalho_centro")?, s("cabecalho_dir")?, 0),
+        rodape: faixa(s("rodape_esq")?, s("rodape_centro")?, s("rodape_dir")?, 1),
+        cabecalho_primeira: faixa(s0("cabecalho1_esq"), s0("cabecalho1_centro"), s0("cabecalho1_dir"), 2),
+        rodape_primeira: faixa(s0("rodape1_esq"), s0("rodape1_centro"), s0("rodape1_dir"), 3),
         primeira_diferente: t.col::<BooleanArray>("primeira_diferente")?.value(0),
         cor_pagina: u("cor_pagina")?,
         marca: s("marca")?,
@@ -692,6 +749,7 @@ fn ler_documento(t: &Lida) -> Result<Documento, String> {
         formato_notas_fim: b8("formato_notas_fim").unwrap_or(2),
         controlar_alteracoes: t.col::<BooleanArray>("controlar_alteracoes").is_ok_and(|a| a.value(0)),
         protegido: t.col::<BooleanArray>("protegido").is_ok_and(|a| a.value(0)),
+        composicao_tex: t.col::<BooleanArray>("composicao_tex").is_ok_and(|a| a.value(0)),
     };
     let mut doc = Documento::vazio();
     doc.meta = Meta { titulo: s("titulo")?, autor: s("autor")? };
@@ -699,6 +757,7 @@ fn ler_documento(t: &Lida) -> Result<Documento, String> {
     doc.extras = extras;
     doc.estilos.numeracao = valor_de(&NUMERACOES, b8("numeracao")?);
     doc.bibliografia.estilo = valor_de(&ESTILOS_DE_CITACAO, b8("estilo_citacao").unwrap_or(0));
+    doc.bibliografia.sem_sl_sn = t.col::<BooleanArray>("sem_sl_sn").is_ok_and(|a| a.value(0));
     doc.proximo_id = t.col::<UInt64Array>("proximo_id")?.value(0);
     Ok(doc)
 }
@@ -727,6 +786,9 @@ fn ler_atrib(t: &Lida, i: usize) -> Result<Atrib, String> {
         sem_numero: b("sem_numero")?,
         legenda: b8("legenda")?,
         cor_marcador: u("cor_marcador")?,
+        // Coluna nova (18/10/2026): o .fdoz de antes não tem.
+        apendice: b("apendice").unwrap_or(false),
+        encher: b("encher").unwrap_or(false),
     })
 }
 
@@ -748,11 +810,13 @@ fn ler_blocos(t: &Lida) -> Result<Vec<Bloco>, String> {
                 5 => Conteudo::Tabela { cabecalho: marca_a.value(i), linhas: Vec::new() },
                 6 => Conteudo::Imagem { origem: texto_de(fonte), legenda: Vec::new(), largura: largura.value(i), altura: altura.value(i) },
                 7 => Conteudo::Equacao { latex: texto_de(fonte) },
-                8 => Conteudo::Sumario { niveis: nivel.value(i), sem_numeros: marca_a.value(i), sem_pontilhado: marca_b.value(i), lista: lista.value(i) },
+                8 => Conteudo::Sumario { niveis: nivel.value(i), sem_numeros: marca_a.value(i), sem_pontilhado: marca_b.value(i), lista: lista.value(i) & 0x7F, latex: lista.value(i) & 0x80 != 0 },
                 9 => Conteudo::Regua,
                 10 => Conteudo::QuebraDePagina,
                 11 => Conteudo::Bibliografia { todas: marca_a.value(i) },
                 12 => Conteudo::IndiceRemissivo,
+                13 => Conteudo::QuebraDeColuna,
+                14 => Conteudo::QuebraDeSecao { inicio: [InicioDeSecao::ProximaPagina, InicioDeSecao::Continua, InicioDeSecao::PaginaPar, InicioDeSecao::PaginaImpar][usize::from(nivel.value(i).min(3))] },
                 outro => return Err(format!("blocos.arrow: tipo de bloco desconhecido ({outro}).")),
             };
             // A coluna é opcional para manter leitura de .fdoz antigos.
@@ -772,7 +836,9 @@ fn ler_blocos(t: &Lida) -> Result<Vec<Bloco>, String> {
                     });
                 }
             }
-            Ok(Bloco { id: id.value(i), conteudo, atrib: ler_atrib(t, i)?, mesclagens })
+            // Opcional também: .fdoz antigos não têm.
+            let latex = t.col::<StringArray>("latex").ok().map_or(String::new(), |v| v.value(i).to_string());
+            Ok(Bloco { id: id.value(i), conteudo, atrib: ler_atrib(t, i)?, mesclagens, latex })
         })
         .collect()
 }
@@ -932,12 +998,17 @@ fn fontes_arrow(fontes: &[Fonte]) -> Result<Vec<u8>, String> {
     let autores: Vec<String> = fontes.iter().map(|f| f.autores.iter().map(|a| format!("{}{ENTRE_NOMES}{}", a.sobrenome, a.nome)).collect::<Vec<_>>().join(&ENTRE_AUTORES.to_string())).collect();
     colunas.push(("autores", Arc::new(StringArray::from(autores))));
     colunas.push(("tipo", Arc::new(UInt8Array::from(fontes.iter().map(|f| codigo_de(&TIPOS_DE_FONTE, &f.tipo)).collect::<Vec<_>>()))));
+    colunas.push(("palavras", Arc::new(StringArray::from(fontes.iter().map(|f| f.palavras.as_str()).collect::<Vec<_>>()))));
+    colunas.push(("nota", Arc::new(StringArray::from(fontes.iter().map(|f| f.nota.as_str()).collect::<Vec<_>>()))));
     tabela(colunas, HashMap::new())
 }
 
 fn ler_fontes(t: &Lida) -> Result<Vec<Fonte>, String> {
     let textos: Vec<&StringArray> = CAMPOS_DE_FONTE.iter().map(|c| t.col::<StringArray>(c)).collect::<Result<_, _>>()?;
     let (autores, tipo) = (t.col::<StringArray>("autores")?, t.col::<UInt8Array>("tipo")?);
+    // Coluna nova (18/10/2026): o .fdoz de antes não tem.
+    let palavras = t.col::<StringArray>("palavras").ok();
+    let nota = t.col::<StringArray>("nota").ok();
     Ok((0..t.linhas())
         .map(|i| {
             let v = |k: usize| textos[k].value(i).to_string();
@@ -948,6 +1019,8 @@ fn ler_fontes(t: &Lida) -> Result<Vec<Fonte>, String> {
             Fonte {
                 chave: v(0), tipo: valor_de(&TIPOS_DE_FONTE, tipo.value(i)), autores: autores.collect(), titulo: v(1), subtitulo: v(2), ano: v(3), edicao: v(4), local: v(5),
                 editora: v(6), veiculo: v(7), volume: v(8), numero: v(9), paginas: v(10), url: v(11), acesso: v(12), doi: v(13),
+                palavras: palavras.map_or(String::new(), |p| p.value(i).to_string()),
+                nota: nota.map_or(String::new(), |p| p.value(i).to_string()),
             }
         })
         .collect())

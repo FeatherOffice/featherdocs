@@ -49,13 +49,10 @@ fn iniciais(nome: &str, pontos: bool) -> String {
     }
 }
 
-/// O sobrenome como o estilo cita no texto (ABNT em maiúsculas).
-fn sobrenome_na_citacao(a: &Autor, e: EstiloDeCitacao) -> String {
-    if e == EstiloDeCitacao::Abnt {
-        a.sobrenome.to_uppercase()
-    } else {
-        a.sobrenome.clone()
-    }
+/// O sobrenome como o estilo cita no texto. Na ABNT (NBR 10520:2023, e o `biblatex-abnt`) também
+/// em maiúsculas e minúsculas: as maiúsculas ficam só na lista de referências.
+fn sobrenome_na_citacao(a: &Autor, _e: EstiloDeCitacao) -> String {
+    a.sobrenome.clone()
 }
 
 /// A primeira palavra do título, quando a fonte não tem autor (a entrada passa a ser pelo título).
@@ -172,12 +169,14 @@ fn autores_abnt(f: &Fonte) -> String {
     }
 }
 
-/// ABNT NBR 6023.
-fn referencia_abnt(f: &Fonte) -> Vec<Trecho> {
+/// ABNT NBR 6023. `sem_sl_sn`: o local e a editora que faltam não viram "[S. l.]: [s. n.]" (e o
+/// relatório sem local não mostra a instituição), como o `noslsn` do biblatex-abnt.
+fn referencia_abnt(f: &Fonte, sem_sl_sn: bool) -> Vec<Trecho> {
     let mut r = Ref::default();
     let autores = autores_abnt(f);
     if !autores.is_empty() {
-        r.txt(&autores).txt(". ");
+        // "Reddy, Thomas B." já termina em ponto: não dobra.
+        r.txt(&autores).txt(if autores.ends_with('.') { " " } else { ". " });
     }
     let local = if f.local.is_empty() { "[S. l.]" } else { &f.local };
     let editora = if f.editora.is_empty() { "[s. n.]" } else { &f.editora };
@@ -196,10 +195,18 @@ fn referencia_abnt(f: &Fonte) -> Vec<Trecho> {
         }
         _ => {
             r.neg(&f.titulo).se(": ", &f.subtitulo, "").txt(".").se(" ", &f.edicao, ". ed.");
-            r.txt(" ").txt(local).txt(": ").txt(editora).txt(", ").txt(ano(f)).txt(".");
+            if sem_sl_sn && f.local.is_empty() {
+                // "8. ed.: Pearson, 2010." e "Campus, 2002.", como o biblatex-abnt escreve.
+                if !f.editora.is_empty() && f.tipo != TipoDeFonte::Relatorio {
+                    r.txt(if f.edicao.is_empty() { " " } else { ": " }).txt(&f.editora).txt(",");
+                }
+                r.txt(" ").txt(ano(f)).txt(".");
+            } else {
+                r.txt(" ").txt(local).txt(": ").txt(editora).txt(", ").txt(ano(f)).txt(".");
+            }
         }
     }
-    r.se(" DOI: ", &f.doi, ".").se(" Disponível em: ", &f.url, ".").se(" Acesso em: ", &f.acesso, ".");
+    r.se(" ", &f.nota, ".").se(" DOI: ", &f.doi, ".").se(" Disponível em: ", &f.url, ".").se(" Acesso em: ", &f.acesso, ".");
     r.t
 }
 
@@ -342,7 +349,8 @@ fn autores_chicago(f: &Fonte) -> String {
 /// Chicago, autor-data.
 fn referencia_chicago(f: &Fonte) -> Vec<Trecho> {
     let mut r = Ref::default();
-    r.se("", &autores_chicago(f), ". ").txt(ano(f)).txt(". ");
+    let autores = autores_chicago(f);
+    r.se("", &autores, if autores.ends_with('.') { " " } else { ". " }).txt(ano(f)).txt(". ");
     match f.tipo {
         TipoDeFonte::Artigo => {
             r.txt("“").txt(&titulo_completo(f)).txt(".” ").ita(&f.veiculo).se(" ", &f.volume, "").se(" (", &f.numero, ")").se(": ", &f.paginas, "").txt(".");
@@ -361,7 +369,7 @@ fn referencia_chicago(f: &Fonte) -> Vec<Trecho> {
 /// A referência de uma fonte (sem o número; quem numera é `lista`).
 pub fn referencia(e: EstiloDeCitacao, f: &Fonte) -> Vec<Trecho> {
     match e {
-        EstiloDeCitacao::Abnt => referencia_abnt(f),
+        EstiloDeCitacao::Abnt => referencia_abnt(f, false),
         EstiloDeCitacao::Apa => referencia_apa(f),
         EstiloDeCitacao::Vancouver => referencia_vancouver(f),
         EstiloDeCitacao::Ieee => referencia_ieee(f),
@@ -378,7 +386,8 @@ fn ordem_alfabetica(f: &Fonte) -> (String, String, String) {
 /// A lista de referências: nos estilos numéricos, na ordem da primeira citação e com o número
 /// na frente; nos outros, em ordem alfabética. `citadas` são as chaves na ordem em que aparecem;
 /// com `todas`, entram também as fontes não citadas (no fim, nos numéricos).
-pub fn lista(e: EstiloDeCitacao, fontes: &[Fonte], citadas: &[String], todas: bool) -> Vec<Vec<Trecho>> {
+pub fn lista(e: EstiloDeCitacao, fontes: &[Fonte], citadas: &[String], todas: bool, sem_sl_sn: bool) -> Vec<Vec<Trecho>> {
+    let referencia = |e, f| if e == EstiloDeCitacao::Abnt { referencia_abnt(f, sem_sl_sn) } else { referencia(e, f) };
     let mut escolhidas: Vec<&Fonte> = citadas.iter().filter_map(|c| fontes.iter().find(|f| &f.chave == c)).collect();
     if todas {
         escolhidas.extend(fontes.iter().filter(|f| !citadas.contains(&f.chave)));
@@ -417,18 +426,28 @@ mod testes {
     }
 
     #[test]
+    fn sem_sl_sn_e_nota_como_o_biblatex_abnt() {
+        let livro = Fonte { chave: "a".into(), autores: vec![autor("Horstmann", "Cay S.")], titulo: "Core Java".into(), ano: "2010".into(), edicao: "8".into(), editora: "Pearson".into(), ..Fonte::default() };
+        let site = Fonte { chave: "b".into(), autores: vec![autor("Larman", "Craig")], titulo: "UML".into(), ano: "2007".into(), editora: "Bookman".into(), nota: "https://x.br/1/".into(), ..Fonte::default() };
+        let relatorio = Fonte { chave: "c".into(), tipo: TipoDeFonte::Relatorio, autores: vec![autor("Caelum", "")], titulo: "FJ-11".into(), ano: "2008".into(), editora: "Caelum Ensino".into(), ..Fonte::default() };
+        let l = lista(EstiloDeCitacao::Abnt, &[livro, site, relatorio], &[], true, true);
+        let t: Vec<String> = l.iter().map(|r| texto_puro(r)).collect();
+        assert_eq!(t, ["CAELUM. FJ-11. 2008.", "HORSTMANN, Cay S. Core Java. 8. ed.: Pearson, 2010.", "LARMAN, Craig. UML. Bookman, 2007. https://x.br/1/."]);
+    }
+
+    #[test]
     fn citacoes_autor_data_nos_tres_estilos() {
         let fontes = [livro(), artigo()];
         let n = HashMap::new();
         let ch = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        assert_eq!(citacao(EstiloDeCitacao::Abnt, &ch(&["silva2023"]), "4", &fontes, &n), "(SILVA; SOUZA, 2023, p. 4)");
-        assert_eq!(citacao(EstiloDeCitacao::Abnt, &ch(&["lima2020", "silva2023"]), "", &fontes, &n), "(LIMA, 2020; SILVA; SOUZA, 2023)");
+        assert_eq!(citacao(EstiloDeCitacao::Abnt, &ch(&["silva2023"]), "4", &fontes, &n), "(Silva; Souza, 2023, p. 4)");
+        assert_eq!(citacao(EstiloDeCitacao::Abnt, &ch(&["lima2020", "silva2023"]), "", &fontes, &n), "(Lima, 2020; Silva; Souza, 2023)");
         assert_eq!(citacao(EstiloDeCitacao::Apa, &ch(&["silva2023"]), "", &fontes, &n), "(Silva & Souza, 2023)");
         assert_eq!(citacao(EstiloDeCitacao::Chicago, &ch(&["lima2020"]), "12", &fontes, &n), "(Lima 2020, 12)");
         assert_eq!(citacao(EstiloDeCitacao::Abnt, &ch(&["xis"]), "", &fontes, &n), "(?xis?)");
         let mut quatro = livro();
         quatro.autores.extend([autor("A", ""), autor("B", "")]);
-        assert_eq!(citacao(EstiloDeCitacao::Abnt, &ch(&["silva2023"]), "", &[quatro], &n), "(SILVA et al., 2023)");
+        assert_eq!(citacao(EstiloDeCitacao::Abnt, &ch(&["silva2023"]), "", &[quatro], &n), "(Silva et al., 2023)");
     }
 
     #[test]
@@ -466,11 +485,11 @@ mod testes {
     fn lista_em_ordem_alfabetica_ou_de_citacao() {
         let fontes = [livro(), artigo()];
         let citadas = vec!["silva2023".to_string(), "lima2020".to_string()];
-        let abnt = lista(EstiloDeCitacao::Abnt, &fontes, &citadas, false);
+        let abnt = lista(EstiloDeCitacao::Abnt, &fontes, &citadas, false, false);
         assert!(texto_puro(&abnt[0]).starts_with("LIMA"));
-        let ieee = lista(EstiloDeCitacao::Ieee, &fontes, &citadas, false);
+        let ieee = lista(EstiloDeCitacao::Ieee, &fontes, &citadas, false, false);
         assert!(texto_puro(&ieee[0]).starts_with("[1] J. P. Silva"));
-        assert_eq!(lista(EstiloDeCitacao::Abnt, &fontes, &citadas[..1], false).len(), 1);
-        assert_eq!(lista(EstiloDeCitacao::Abnt, &fontes, &citadas[..1], true).len(), 2);
+        assert_eq!(lista(EstiloDeCitacao::Abnt, &fontes, &citadas[..1], false, false).len(), 1);
+        assert_eq!(lista(EstiloDeCitacao::Abnt, &fontes, &citadas[..1], true, false).len(), 2);
     }
 }

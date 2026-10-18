@@ -163,7 +163,7 @@ pub fn objeto_markdown(t: &Trecho) -> String {
             }
         }
         Some(Marca::Campo { .. }) => t.rotulo.clone(),
-        Some(Marca::Indice { .. } | Marca::Comentario { .. }) | None => String::new(),
+        Some(Marca::Indice { .. } | Marca::Comentario { .. } | Marca::Imagem { .. }) | None => String::new(),
     }
 }
 

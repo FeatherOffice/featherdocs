@@ -13,3 +13,17 @@ pub mod pagina;
 pub mod pdf;
 pub mod painel_codigo;
 pub mod quadro;
+
+/// As fontes do texto que o programa leva (a interface, a página e o texto dos SVG usam as mesmas).
+pub const FONTES_DO_TEXTO: [&[u8]; 10] = [
+    include_bytes!("../dados/fontes/LiberationSans-Regular.ttf"),
+    include_bytes!("../dados/fontes/LiberationSans-Bold.ttf"),
+    include_bytes!("../dados/fontes/LiberationSans-Italic.ttf"),
+    include_bytes!("../dados/fontes/LiberationSans-BoldItalic.ttf"),
+    include_bytes!("../dados/fontes/LiberationSerif-Regular.ttf"),
+    include_bytes!("../dados/fontes/LiberationSerif-Bold.ttf"),
+    include_bytes!("../dados/fontes/LiberationSerif-Italic.ttf"),
+    include_bytes!("../dados/fontes/LiberationSerif-BoldItalic.ttf"),
+    include_bytes!("../dados/fontes/LiberationMono-Regular.ttf"),
+    include_bytes!("../dados/fontes/LiberationMono-Bold.ttf"),
+];

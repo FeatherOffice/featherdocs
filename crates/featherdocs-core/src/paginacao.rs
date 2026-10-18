@@ -70,7 +70,7 @@ fn letras(mut n: u32) -> String {
 }
 
 /// O número romano (maiúsculo) de `n`.
-pub(crate) fn romano(mut n: u32) -> String {
+pub fn romano(mut n: u32) -> String {
     const TABELA: [(u32, &str); 13] = [(1000, "M"), (900, "CM"), (500, "D"), (400, "CD"), (100, "C"), (90, "XC"), (50, "L"), (40, "XL"), (10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I")];
     let mut s = String::new();
     for (v, r) in TABELA {
@@ -82,8 +82,12 @@ pub(crate) fn romano(mut n: u32) -> String {
     s
 }
 
-/// O texto do marcador de um item: o estilo de lista escolhido, ou o padrão do nível.
-fn marcador(ordenado: bool, a: &Atrib, nivel: usize, contagem: u32) -> String {
+/// O texto do marcador de um item: o rótulo do LaTeX (`modelo`, ver [`rotulo_do_modelo`]), o estilo de
+/// lista escolhido, ou o padrão do nível.
+fn marcador(ordenado: bool, a: &Atrib, nivel: usize, contagem: u32, modelo: &str) -> String {
+    if let Some(r) = rotulo_do_modelo(modelo, contagem) {
+        return r;
+    }
     match (a.lista, ordenado) {
         (Lista::Circulo, _) => "○".to_string(),
         (Lista::Quadrado, _) => "▪".to_string(),
@@ -91,14 +95,26 @@ fn marcador(ordenado: bool, a: &Atrib, nivel: usize, contagem: u32) -> String {
         (Lista::Tarefa, _) => String::new(),
         (Lista::Alfabetica, _) => format!("{})", letras(contagem)),
         (Lista::Romana, _) => format!("{}.", romano(contagem)),
+        (Lista::RomanaMinuscula, _) => format!("{}.", romano(contagem).to_lowercase()),
         (_, true) => format!("{contagem}."),
         (_, false) => ["•", "◦", "▪"][nivel % 3].to_string(),
     }
 }
 
+/// O rótulo de texto de um item vindo do LaTeX, guardado no `Bloco::latex` como `estilo|modelo`
+/// (`b|Art. #oº`: `b` = negrito, `r` = continua a contagem, `d` = rótulo alinhado à direita). No modelo, `#1` é o número, `#a`/`#A` a letra, `#i`/`#I` o romano e
+/// `#o` o ordinal da legislação (1º até 9º, depois 10, 11…).
+pub fn rotulo_do_modelo(modelo: &str, contagem: u32) -> Option<String> {
+    let (_, m) = modelo.split_once('|')?;
+    let ordinal = if contagem < 10 { format!("{contagem}º") } else { contagem.to_string() };
+    Some(m.replace("#1", &contagem.to_string()).replace("#a", &letras(contagem)).replace("#A", &letras(contagem).to_uppercase()).replace("#i", &romano(contagem).to_lowercase()).replace("#I", &romano(contagem)).replace("#o", &ordinal))
+}
+
 /// O marcador de cada bloco (só os itens de lista têm).
 pub fn marcadores(blocos: &[Bloco]) -> Vec<Option<String>> {
     let mut contadores = [0u32; 9];
+    // As listas com `resume` (rótulo do LaTeX com `r`): a contagem segue de uma lista para a outra.
+    let mut seguidas: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
     blocos
         .iter()
         .map(|b| match &b.conteudo {
@@ -115,8 +131,15 @@ pub fn marcadores(blocos: &[Bloco]) -> Vec<Option<String>> {
                 } else {
                     contadores[n] = 0;
                 }
-                Some(marcador(*ordenado, &b.atrib, n, contadores[n]))
+                if b.latex.split_once('|').is_some_and(|(e, _)| e.contains('r')) {
+                    let c = seguidas.entry(b.latex.as_str()).or_insert(0);
+                    *c += 1;
+                    return Some(marcador(*ordenado, &b.atrib, n, *c, &b.latex));
+                }
+                Some(marcador(*ordenado, &b.atrib, n, contadores[n], &b.latex))
             }
+            // Um parágrafo recuado no meio da lista (a continuação de um item) não interrompe a contagem.
+            _ if b.atrib.recuo_esq >= 18.0 => None,
             _ => {
                 contadores = [0; 9];
                 None
@@ -135,6 +158,7 @@ pub fn numeros_dos_titulos(blocos: &[Bloco], numeracao: Numeracao, capitulo: &st
 /// sempre, cada tipo com o seu contador; `rotulos` são as palavras de figura, tabela e equação.
 pub fn numeros<S: AsRef<str>>(blocos: &[Bloco], numeracao: Numeracao, capitulo: &str, rotulos: &[S]) -> Vec<Option<String>> {
     let mut contadores = [0u32; 6];
+    let mut apendice = false;
     let mut legendas = [0u32; 3];
     let mut equacoes = 0u32;
     blocos
@@ -152,7 +176,8 @@ pub fn numeros<S: AsRef<str>>(blocos: &[Bloco], numeracao: Numeracao, capitulo: 
             if (1..=3).contains(&b.atrib.legenda) && matches!(b.conteudo, Conteudo::Paragrafo { .. }) {
                 let k = usize::from(b.atrib.legenda - 1);
                 legendas[k] += 1;
-                return Some(format!("{} {} –", rotulos.get(k).map_or("", AsRef::as_ref), legendas[k]));
+                let separador = if matches!(b.latex.as_str(), ":" | ".") { b.latex.as_str() } else { " –" };
+                return Some(format!("{} {}{separador}", rotulos.get(k).map_or("", AsRef::as_ref), legendas[k]));
             }
             if numeracao == Numeracao::Nenhuma {
                 return None;
@@ -161,15 +186,33 @@ pub fn numeros<S: AsRef<str>>(blocos: &[Bloco], numeracao: Numeracao, capitulo: 
             if b.atrib.sem_numero {
                 return None;
             }
+            if b.atrib.apendice && !apendice {
+                apendice = true;
+                contadores[0] = 0;
+            }
             let n = usize::from(nivel.clamp(1, 6)) - 1;
             contadores[n] += 1;
             for c in &mut contadores[n + 1..] {
                 *c = 0;
             }
-            let partes: Vec<String> = contadores[..=n].iter().map(u32::to_string).collect();
+            let mut partes: Vec<String> = contadores[..=n].iter().map(u32::to_string).collect();
+            if apendice {
+                partes[0] = letra(contadores[0]);
+            }
             Some(if numeracao == Numeracao::Capitulo && n == 0 { format!("{capitulo} {}", partes[0]) } else { partes.join(".") })
         })
         .collect()
+}
+
+/// 1 → A, 26 → Z, 27 → AA, como o `\Alph` do LaTeX estendido.
+pub fn letra(mut n: u32) -> String {
+    let mut s = String::new();
+    while n > 0 {
+        n -= 1;
+        s.insert(0, char::from(b'A' + (n % 26) as u8));
+        n /= 26;
+    }
+    s
 }
 
 struct Corrida<'a> {
@@ -207,12 +250,31 @@ impl Corrida<'_> {
     }
 
     fn nova_pagina(&mut self) {
+        self.encher();
         let antiga = std::mem::take(&mut self.atual);
         self.paginas.push(antiga);
         self.y = 0.0;
         self.notas = 0.0;
         self.depois_anterior = 0.0;
         self.anterior_foi_item = false;
+    }
+
+    /// Reparte o que sobra no pé da página entre os blocos com espaço elástico antes (o `\vfill`).
+    /// No topo da página ele some, como no LaTeX.
+    fn encher(&mut self) {
+        let elasticas = self.atual.fatias.iter().skip(1).filter(|f| f.de == 0 && self.layouts[f.bloco].encher).count();
+        let Some(ultima) = self.atual.fatias.last() else { return };
+        if elasticas == 0 || !self.atual.notas_fim.is_empty() {
+            return;
+        }
+        let passo = (self.altura - self.notas - ultima.y - ultima.altura).max(0.0) / elasticas as f32;
+        let mut desloc = 0.0;
+        for (k, f) in self.atual.fatias.iter_mut().enumerate() {
+            if k > 0 && f.de == 0 && self.layouts[f.bloco].encher {
+                desloc += passo;
+            }
+            f.y += desloc;
+        }
     }
 
     /// Como `cabem`, contando o pé da página que as notas das linhas tomam.
@@ -295,6 +357,10 @@ impl Corrida<'_> {
                     self.colocar(i, de, n, gap, consumido);
                     if lay.quebra_depois {
                         self.quebrar();
+                        // A página nova é a `paginas.len() + 1`; sem a paridade pedida, fica uma em branco no meio.
+                        if lay.pagina_par.is_some_and(|par| (self.paginas.len() + 1).is_multiple_of(2) != par) {
+                            self.nova_pagina();
+                        }
                     }
                     return;
                 }
@@ -390,6 +456,7 @@ pub fn paginar(layouts: &[Arc<LayoutBloco>], marcadores: &[Option<String>], altu
         c.bloco(i);
     }
     c.notas_de_fim();
+    c.encher();
     if c.pagina_tem_algo() || c.paginas.is_empty() || c.quebrou_no_fim {
         let ultima = std::mem::take(&mut c.atual);
         c.paginas.push(ultima);
@@ -451,6 +518,17 @@ mod testes {
         assert_eq!(p.len(), 2);
         assert_eq!(p[0].fatias.len(), 2, "o texto e a marca da quebra ficam na primeira");
         assert_eq!(p[1].fatias[0].bloco, 2);
+    }
+
+    #[test]
+    fn vfill_reparte_o_que_sobra_na_pagina() {
+        let elastico = || Arc::new(LayoutBloco { encher: true, ..(*bloco(1, 10.0)).clone() });
+        // A capa: título, autor e data com `\vfill` antes dos dois últimos, e a quebra.
+        let p = rodar(vec![elastico(), bloco(1, 10.0), elastico(), elastico(), quebra(), bloco(1, 10.0)], 100.0);
+        let ys: Vec<f32> = p[0].fatias.iter().map(|f| f.y).collect();
+        // Sobram 50 (5 linhas de 10): 25 antes de cada elástico; o do topo não conta.
+        assert_eq!(ys, [0.0, 10.0, 45.0, 80.0, 90.0]);
+        assert_eq!(p[1].fatias[0].y, 0.0);
     }
 
     #[test]
@@ -521,5 +599,16 @@ mod testes {
         assert_eq!(c[0].as_deref(), Some("Capítulo 1"));
         assert_eq!(c[2].as_deref(), Some("1.1"));
         assert!(numeros_dos_titulos(&blocos, Numeracao::Nenhuma, "").iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn apendice_recomeca_em_letras() {
+        let t = |nivel: u8| Bloco::novo(0, Conteudo::Titulo { nivel, texto: Vec::new() });
+        let mut a = t(1);
+        a.atrib.apendice = true;
+        let blocos = [t(1), t(1), a, t(2), t(1)];
+        let n: Vec<String> = numeros_dos_titulos(&blocos, Numeracao::Decimal, "").into_iter().map(Option::unwrap_or_default).collect();
+        assert_eq!(n, ["1", "2", "A", "A.1", "B"]);
+        assert_eq!((letra(26), letra(27)), ("Z".to_string(), "AA".to_string()));
     }
 }

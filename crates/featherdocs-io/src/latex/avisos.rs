@@ -16,6 +16,12 @@ pub enum TipoDeAviso {
     Comando,
     /// Arquivo do `\input`/`\include` que não foi achado ao lado do `.tex`.
     Arquivo,
+    /// Comando conhecido que o leitor descarta: lido, mas sem efeito no documento (`\hspace`).
+    SemEfeito,
+    /// O que o pdfLaTeX também daria como erro. O nome é "mensagem: trecho", e o trecho acha a linha.
+    Erro,
+    /// O que o LaTeX avisa no log (sem parar). Mesmo formato de nome do `Erro`.
+    AvisoDoLatex,
 }
 
 impl TipoDeAviso {
@@ -27,6 +33,9 @@ impl TipoDeAviso {
             Self::Ambiente => "Ambiente",
             Self::Comando => "Comando",
             Self::Arquivo => "Arquivo",
+            Self::SemEfeito => "Sem efeito",
+            Self::Erro => "Erro do LaTeX",
+            Self::AvisoDoLatex => "Aviso do LaTeX",
         }
     }
 }
@@ -41,6 +50,8 @@ pub struct Aviso {
     pub linha: usize,
     /// Quantas vezes o leitor passou por ele.
     pub vezes: usize,
+    /// Todas as linhas onde ele aparece (a primeira é `linha`), para marcar no código.
+    pub linhas: Vec<usize>,
 }
 
 impl Aviso {
@@ -72,9 +83,6 @@ pub(super) struct Juntado {
     pub avisos: Vec<(TipoDeAviso, String)>,
     /// Os rótulos de cada bloco marcado (o bloco leva `id` = `MARCA_DE_ROTULO | índice` até o fim da leitura).
     pub rotulos: Vec<Vec<String>>,
-    /// O número que `\ref{rótulo}` mostra ("2.1", "3"), contado como o LaTeX conta.
-    pub numeros: HashMap<String, String>,
-    pub contadores: HashMap<String, u32>,
 }
 
 /// O bit alto do `id` provisório de um bloco que tem rótulo.
@@ -96,14 +104,6 @@ impl Coletor {
         let mut j = self.0.borrow_mut();
         j.rotulos.push(rotulos);
         MARCA_DE_ROTULO | (j.rotulos.len() as u64 - 1)
-    }
-
-    /// Soma 1 ao contador `nome` e devolve o valor novo.
-    pub(super) fn contar(&self, nome: &str) -> u32 {
-        let mut j = self.0.borrow_mut();
-        let c = j.contadores.entry(nome.to_string()).or_insert(0);
-        *c += 1;
-        *c
     }
 
     pub(super) fn comando(&self, nome: &str) {
@@ -133,8 +133,8 @@ impl Coletor {
             .into_iter()
             .map(|(tipo, nome)| {
                 let vezes = contagem[&(tipo, nome.clone())];
-                let linha = linha_de(fonte, tipo, &nome);
-                Aviso { tipo, nome, linha, vezes }
+                let linhas = linhas_de(fonte, tipo, &nome);
+                Aviso { tipo, linha: linhas.first().copied().unwrap_or(0), nome, vezes, linhas }
             })
             .collect();
         saida.sort_by_key(|a| (a.linha == 0, a.linha, a.tipo));
@@ -142,21 +142,34 @@ impl Coletor {
     }
 }
 
-/// A linha (1…) onde o item aparece primeiro no fonte; 0 se não aparece.
-fn linha_de(fonte: &str, tipo: TipoDeAviso, nome: &str) -> usize {
-    let pos = match tipo {
-        TipoDeAviso::Comando => fonte.match_indices(nome).find(|(i, _)| !fonte[i + nome.len()..].starts_with(|c: char| c.is_ascii_alphabetic())).map(|(i, _)| i),
-        TipoDeAviso::Ambiente => fonte.find(&format!("\\begin{{{nome}}}")),
+/// As linhas (1…) onde o item aparece no fonte; vazia se não aparece (veio de macro). Comando e
+/// ambiente são lidos no corpo: se aparecem nele, as do preâmbulo (já tratadas lá) ficam de fora.
+fn linhas_de(fonte: &str, tipo: TipoDeAviso, nome: &str) -> Vec<usize> {
+    let posicoes: Vec<usize> = match tipo {
+        TipoDeAviso::Erro | TipoDeAviso::AvisoDoLatex => {
+            let trecho = nome.rsplit_once(": ").map_or(nome, |(_, t)| t);
+            fonte.match_indices(trecho).map(|(i, _)| i).collect()
+        }
+        TipoDeAviso::Comando | TipoDeAviso::SemEfeito => {
+            fonte.match_indices(nome).filter(|(i, _)| !fonte[i + nome.len()..].starts_with(|c: char| c.is_ascii_alphabetic())).map(|(i, _)| i).collect()
+        }
+        TipoDeAviso::Ambiente => fonte.match_indices(&format!("\\begin{{{nome}}}")).map(|(i, _)| i).collect(),
         TipoDeAviso::Pacote | TipoDeAviso::Classe | TipoDeAviso::Arquivo => fonte
             .match_indices(nome)
-            .find(|(i, _)| {
+            .filter(|(i, _)| {
                 let antes = fonte[..*i].chars().next_back();
                 let depois = fonte[i + nome.len()..].chars().next();
                 !antes.is_some_and(|c| c.is_alphanumeric() || c == '-') && !depois.is_some_and(|c| c.is_alphanumeric() || c == '-')
             })
-            .map(|(i, _)| i),
+            .map(|(i, _)| i)
+            .collect(),
     };
-    pos.map_or(0, |p| fonte[..p].matches('\n').count() + 1)
+    let corpo = fonte.find("\\begin{document}").unwrap_or(0);
+    let no_corpo: Vec<usize> = posicoes.iter().copied().filter(|p| *p > corpo).collect();
+    let escolhidas = if matches!(tipo, TipoDeAviso::Comando | TipoDeAviso::SemEfeito | TipoDeAviso::Ambiente) && !no_corpo.is_empty() { no_corpo } else { posicoes };
+    let mut linhas: Vec<usize> = escolhidas.into_iter().map(|p| fonte[..p].matches('\n').count() + 1).collect();
+    linhas.dedup();
+    linhas
 }
 
 /// Comandos que o leitor reconhece de propósito sem efeito visível (o que o FeatherDocs faz do
@@ -193,14 +206,17 @@ pub(super) fn pacote_conhecido(nome: &str) -> bool {
         "minted", "verbatim", "fancyvrb", "ulem", "soul", "siunitx", "footmisc", "endnotes", "makeidx", "imakeidx",
         // Matemática (montada por outro motor) e referências.
         "amsmath", "amssymb", "amsfonts", "amsthm", "mathtools", "bm", "natbib", "biblatex", "cite", "cleveref", "varioref", "filecontents",
-        "abntex2cite",
+        "abntex2cite", "tcolorbox", "tikz",
+        // Só valem pelos comandos e ambientes deles, que entram no aviso um a um quando o leitor não os faz.
+        "iftex", "ifxetex", "ifluatex", "unicode-math", "newunicodechar", "pgf", "pdflscape", "lscape", "breakcites", "xargs", "xifthen",
+        "supertabular", "fontawesome6", "ccicons", "pifont", "mdframed", "censor",
     ];
     CONHECIDOS.contains(&nome)
 }
 
 /// Classes que o leitor sabe ler (as outras saem como `article`, com aviso).
 pub(super) fn classe_conhecida(nome: &str) -> bool {
-    matches!(nome, "article" | "report" | "book" | "letter" | "scrartcl" | "scrreprt" | "scrbook" | "extarticle" | "extreport" | "memoir" | "abntex2" | "minimal")
+    matches!(nome, "article" | "report" | "book" | "letter" | "scrartcl" | "scrreprt" | "scrbook" | "extarticle" | "extreport" | "memoir" | "abntex2" | "minimal" | "exam")
 }
 
 /// Os pacotes de `\usepackage[…]{a,b}` e `\RequirePackage` do preâmbulo.

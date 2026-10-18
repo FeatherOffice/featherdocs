@@ -201,6 +201,20 @@ impl Sessao {
         Some(self.pos_na_linha(f.bloco, li, x, y - topo))
     }
 
+    /// O título para onde leva a linha do sumário em (`x`, `y`) da página, se o ponto cai numa.
+    pub fn alvo_do_sumario(&self, pagina: usize, y: f32) -> Option<u64> {
+        let y = y - self.doc.pagina.margem_sup;
+        let f = self.paginas.get(pagina)?.fatias.iter().find(|f| (f.y..f.y + f.altura).contains(&y))?;
+        let mut topo = f.y;
+        for linha in &self.layouts[f.bloco].linhas[f.de..f.ate] {
+            if y < topo + linha.altura {
+                return linha.alvo;
+            }
+            topo += linha.altura;
+        }
+        None
+    }
+
     /// O ponto da linha `li` do bloco `i` mais perto de `x` (e de `y_na_linha`, para células de várias linhas).
     pub(crate) fn pos_na_linha(&self, i: usize, li: usize, x: f32, y_na_linha: f32) -> Pos {
         let b = &self.doc.blocos[i];

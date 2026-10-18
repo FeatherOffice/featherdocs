@@ -185,7 +185,7 @@ cargo run --manifest-path featherdocs/crates/featherdocs-io/Cargo.toml --example
 
 > **Interface nativa (08/10/2026):** `crates/featherdocs-gui/` usa Rust/Iced,
 > o tema e os componentes de `../feather-ui/`, com os motores existentes.
-> A interface Tauri permanece disponível durante a migração dos demais recursos.
+> A interface Tauri/TypeScript antiga foi apagada em 18/10/2026; só a Iced existe.
 
 
 Editor de documentos da suíte FeatherOffice, formato próprio `.fdoz`.

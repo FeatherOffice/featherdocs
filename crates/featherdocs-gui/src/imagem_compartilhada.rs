@@ -1,13 +1,15 @@
 //! Adaptação de imagens do FeatherDocs para o motor compartilhado Image.
 //! Os bytes originais permanecem no documento, inclusive durante a exportação
 //! DOCX/FDOZ: apenas a prévia Iced passa por redimensionamento RGBA neutro.
+use crate::localidade::{tr, trf};
 use feather_image::ImagemRgba;
 use image::{ImageFormat, ImageReader};
 use std::io::Cursor;
 
 const MAX_ARQUIVO: usize = 32 * 1024 * 1024;
 const MAX_PIXELS: u64 = 40_000_000;
-const LADO_PREVIA: u32 = 4_096;
+// A página ocupa uns 800 px na tela a 100%: 1600 ainda fica nítido no zoom de 200%.
+const LADO_PREVIA: u32 = 1_600;
 const LARGURA_INSERCAO: f32 = 400.0;
 
 /// Preserva os bytes PNG/JPEG em data URL, sem gravar o raster da prévia.
@@ -20,11 +22,11 @@ pub fn preparar_insercao(bytes: &[u8]) -> Result<(String, f32, f32), String> {
     // A inserção precisa garantir que o conteúdo poderá ser exibido.
     ImageReader::with_format(Cursor::new(bytes), formato)
         .decode()
-        .map_err(|e| format!("Imagem corrompida: {e}"))?;
+        .map_err(|e| trf("Imagem corrompida: {}", &[&e]))?;
     let mime = match formato {
         ImageFormat::Png => "image/png",
         ImageFormat::Jpeg => "image/jpeg",
-        _ => return Err("Formato de imagem não suportado.".into()),
+        _ => return Err(tr("Formato de imagem não suportado.").into()),
     };
     let escala = (LARGURA_INSERCAO / largura as f32).min(1.0);
     let url = format!(
@@ -36,20 +38,27 @@ pub fn preparar_insercao(bytes: &[u8]) -> Result<(String, f32, f32), String> {
 
 fn inspecionar(bytes: &[u8]) -> Result<(ImageFormat, u32, u32), String> {
     if bytes.is_empty() || bytes.len() > MAX_ARQUIVO {
-        return Err("Imagem vazia ou maior que 32 MiB.".into());
+        return Err(tr("Imagem vazia ou maior que 32 MiB.").into());
     }
     let formato = image::guess_format(bytes)
-        .map_err(|_| "Cabeçalho de imagem não reconhecido.".to_owned())?;
+        .map_err(|_| tr("Cabeçalho de imagem não reconhecido.").to_owned())?;
     if !matches!(formato, ImageFormat::Png | ImageFormat::Jpeg) {
-        return Err("Somente imagens PNG e JPEG são aceitas.".into());
+        return Err(tr("Somente imagens PNG e JPEG são aceitas.").into());
     }
     let leitor = ImageReader::with_format(Cursor::new(bytes), formato);
     let (largura, altura) = leitor.into_dimensions()
-        .map_err(|e| format!("Cabeçalho de imagem inválido: {e}"))?;
+        .map_err(|e| trf("Cabeçalho de imagem inválido: {}", &[&e]))?;
     if largura == 0 || altura == 0 || u64::from(largura) * u64::from(altura) > MAX_PIXELS {
-        return Err("Dimensões de imagem acima do limite seguro.".into());
+        return Err(tr("Dimensões de imagem acima do limite seguro.").into());
     }
     Ok((formato, largura, altura))
+}
+
+/// O PNG/JPEG na resolução original, para o visualizador com zoom (a prévia da página para em
+/// 1600 px e ficaria pixelada de perto). Confere as dimensões antes, como na inserção.
+pub fn original_para_zoom(bytes: &[u8]) -> Option<(iced::widget::image::Handle, u32, u32)> {
+    let (_, w, h) = inspecionar(bytes).ok()?;
+    Some((iced::widget::image::Handle::from_bytes(bytes.to_vec()), w, h))
 }
 
 /// Decodifica os dados originais e cria pixels da prévia por Image compartilhado.
@@ -66,17 +75,17 @@ pub fn preparar_previa(origem: &str) -> Option<(u32, u32, Vec<u8>)> {
         return None;
     }
     let (_, largura, altura) = inspecionar(&bytes).ok()?;
-    let decodificada = image::load_from_memory(&bytes).ok()?.to_rgba8();
-    let imagem = ImagemRgba::de_image(decodificada).ok()?;
+    let mut decodificada = image::load_from_memory(&bytes).ok()?.to_rgba8();
     let maior = largura.max(altura);
-    let saida = if maior > LADO_PREVIA {
+    if maior > LADO_PREVIA {
         let escala = f64::from(LADO_PREVIA) / f64::from(maior);
         let w = (f64::from(largura) * escala).round().max(1.0) as u32;
         let h = (f64::from(altura) * escala).round().max(1.0) as u32;
-        imagem.redimensionar_bilinear(w, h).ok()?
-    } else {
-        imagem
-    };
+        // O triângulo do `image` alarga com a redução (média da área): o bilinear de 4 pontos e a
+        // GPU sem mipmap pulam pixels e serrilham o texto dos gráficos.
+        decodificada = image::imageops::resize(&decodificada, w, h, image::imageops::FilterType::Triangle);
+    }
+    let saida = ImagemRgba::de_image(decodificada).ok()?;
     let (w, h) = saida.dimensoes();
     Some((w, h, saida.em_pixels()))
 }
@@ -95,29 +104,29 @@ pub fn aplicar_efeito_embutido(
     }
     const MAX_PIXELS_EFEITOS: u64 = 4_000_000;
     let (mime, bytes) = featherdocs_io::base64::de_data_url(origem)
-        .ok_or("A imagem não é um PNG/JPEG embutido válido.")?;
+        .ok_or_else(|| tr("A imagem não é um PNG/JPEG embutido válido.").to_string())?;
     if !matches!(mime.as_str(), "image/png" | "image/jpeg" | "image/jpg") {
-        return Err("O efeito exige uma imagem PNG/JPEG, não um gráfico SVG.".into());
+        return Err(tr("O efeito exige uma imagem PNG/JPEG, não um gráfico SVG.").into());
     }
     let (_, largura, altura) = inspecionar(&bytes)?;
     if u64::from(largura) * u64::from(altura) > MAX_PIXELS_EFEITOS {
-        return Err("Imagem grande demais para edição interativa (4 milhões de pixels).".into());
+        return Err(tr("Imagem grande demais para edição interativa (4 milhões de pixels).").into());
     }
     let origem_rgba = ImagemRgba::de_image(
-        image::load_from_memory(&bytes).map_err(|e| format!("Imagem corrompida: {e}"))?.to_rgba8()
-    ).map_err(|e| format!("Buffer RGBA inválido: {e:?}"))?;
+        image::load_from_memory(&bytes).map_err(|e| trf("Imagem corrompida: {}", &[&e]))?.to_rgba8()
+    ).map_err(|e| trf("Buffer RGBA inválido: {}", &[&format!("{e:?}")]))?;
     let saida = efeito.executar(&origem_rgba)
-        .map_err(|e| format!("Falha ao aplicar efeito: {e:?}"))?;
+        .map_err(|e| trf("Falha ao aplicar efeito: {}", &[&format!("{e:?}")]))?;
     let mut buffer = Vec::new();
     image::DynamicImage::ImageRgba8(saida.em_image())
         .write_to(&mut Cursor::new(&mut buffer), ImageFormat::Png)
-        .map_err(|e| format!("Falha ao gerar PNG: {e}"))?;
+        .map_err(|e| trf("Falha ao gerar PNG: {}", &[&e]))?;
     let data_url = format!(
         "data:image/png;base64,{}",
         featherdocs_io::base64::codificar(&buffer)
     );
     if data_url.len() > 16 * 1024 * 1024 {
-        return Err("PNG resultante excede o limite do documento (16 MiB).".into());
+        return Err(tr("PNG resultante excede o limite do documento (16 MiB).").into());
     }
     Ok(data_url)
 }

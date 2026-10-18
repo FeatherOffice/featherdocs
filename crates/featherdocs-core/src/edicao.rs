@@ -3,7 +3,7 @@
 //! digita a marca e o bloco vira o tipo certo — a marca crua nunca fica no documento.
 
 use crate::inline::{serializar, texto_puro};
-use crate::modelo::{Celula, Conteudo, Trecho};
+use crate::modelo::{Celula, Conteudo, InicioDeSecao, Trecho};
 
 /// O texto corrido de um bloco que tem texto em linha.
 pub fn trechos_de(c: &Conteudo) -> Option<&Vec<Trecho>> {
@@ -28,6 +28,14 @@ pub fn nome_do_tipo(c: &Conteudo) -> String {
         Conteudo::Sumario { .. } => "sumario".into(),
         Conteudo::Regua => "regua".into(),
         Conteudo::QuebraDePagina => "quebra_de_pagina".into(),
+        Conteudo::QuebraDeColuna => "quebra_de_coluna".into(),
+        Conteudo::QuebraDeSecao { inicio } => match inicio {
+            InicioDeSecao::ProximaPagina => "secao_proxima",
+            InicioDeSecao::Continua => "secao_continua",
+            InicioDeSecao::PaginaPar => "secao_par",
+            InicioDeSecao::PaginaImpar => "secao_impar",
+        }
+        .into(),
         Conteudo::Bibliografia { .. } => "bibliografia".into(),
         Conteudo::IndiceRemissivo => "indice_remissivo".into(),
     }
@@ -63,7 +71,8 @@ pub fn fonte_de(c: &Conteudo) -> String {
 }
 
 /// O mesmo conteúdo em outro tipo. Os nomes: `paragrafo`, `titulo1`…`titulo6`, `item`,
-/// `item_ordenado`, `citacao`, `codigo`, `equacao`, `tabela`, `regua`, `sumario`, `quebra_de_pagina`.
+/// `item_ordenado`, `citacao`, `codigo`, `equacao`, `tabela`, `regua`, `sumario`, `quebra_de_pagina`,
+/// `quebra_de_coluna`, `secao_proxima`, `secao_continua`, `secao_par`, `secao_impar`.
 pub fn converter(c: &Conteudo, tipo: &str) -> Result<Conteudo, String> {
     let texto = trechos_de(c).cloned().unwrap_or_else(|| vec![Trecho::simples(&fonte_de(c))]);
     let nivel = if let Conteudo::Item { nivel, .. } = c { *nivel } else { 0 };
@@ -77,6 +86,11 @@ pub fn converter(c: &Conteudo, tipo: &str) -> Result<Conteudo, String> {
         "tabela" => tabela_nova(texto),
         "regua" => Conteudo::Regua,
         "quebra_de_pagina" => Conteudo::QuebraDePagina,
+        "quebra_de_coluna" => Conteudo::QuebraDeColuna,
+        "secao_proxima" => Conteudo::QuebraDeSecao { inicio: InicioDeSecao::ProximaPagina },
+        "secao_continua" => Conteudo::QuebraDeSecao { inicio: InicioDeSecao::Continua },
+        "secao_par" => Conteudo::QuebraDeSecao { inicio: InicioDeSecao::PaginaPar },
+        "secao_impar" => Conteudo::QuebraDeSecao { inicio: InicioDeSecao::PaginaImpar },
         "sumario" => Conteudo::sumario(3),
         "bibliografia" => Conteudo::Bibliografia { todas: false },
         "indice_remissivo" => Conteudo::IndiceRemissivo,

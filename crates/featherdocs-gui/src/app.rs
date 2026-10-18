@@ -5,7 +5,7 @@ use crate::{
     configuracao::Configuracao,
     cor_ui::{AlvoCor, EstadoCor},
     faixa::{self, Aba},
-    localidade::tr,
+    localidade::{tr, trf},
     pagina::Pagina,
     painel_codigo::{self, PainelCodigo},
     quadro::{Operacao, Quadro},
@@ -30,6 +30,7 @@ pub enum Comando {
     Salvar,
     SalvarComo,
     Exportar,
+    ExportarPdf,
     Desfazer,
     Refazer,
     Copiar,
@@ -87,6 +88,10 @@ pub enum Comando {
     TabelaExcluir,
     Imagem,
     Quebra,
+    /// Quebra de linha dentro do parágrafo (Layout → Quebras → Disposição do texto; Shift+Enter).
+    QuebraDeLinha,
+    /// Um dos estilos rápidos (`dialogos::RAPIDOS`).
+    EstiloRapido(usize),
     Sumario,
     Papel(&'static str),
     Orientacao(bool),
@@ -126,6 +131,16 @@ pub enum Msg {
     AjudaEvento(feather_ui::ajuda::Evento),
     Tecla(keyboard::Key, keyboard::Modifiers, Option<String>),
     Clicar(usize, f32, f32, bool, u8),
+    /// O botão do mouse foi solto: acabou o arrasto da seleção.
+    Soltar,
+    /// Evento da janela do Monitor (F12).
+    MonitorEvento(feather_ui::monitor::Evento),
+    /// Uma amostra de memória e CPU por segundo, enquanto o Monitor está aberto.
+    MonitorPulso,
+    /// Abre (ou fecha, com `None`) um menu que desce da faixa.
+    MenuFaixa(Option<crate::faixa::MenuFaixa>),
+    /// Onde o ponteiro está sobre a faixa: o menu aberto desce dali.
+    PonteiroFaixa(iced::Point),
     IrBloco(u64),
     Colado(Option<String>),
     ColadoPuro(Option<String>),
@@ -152,6 +167,13 @@ pub enum Msg {
     FormEscolher(u64),
     Aberto(Result<Option<(PathBuf, Documento)>, String>),
     Gravado(Result<Option<(PathBuf, u64, bool)>, String>),
+    /// O formato escolhido para exportar não leva tudo: o caminho e o que se perde (pede confirmação).
+    PerdasAoExportar(PathBuf, Vec<&'static str>),
+    ExportarMesmoAssim,
+    FecharPerdas,
+    /// A janela Exportar PDF com as opções mudadas.
+    OpcoesPdf(crate::pdf::OpcoesPdf),
+    ConfirmarPdf,
     Imagem(Result<Option<(String, f32, f32)>, String>),
     AbrirEfeitosImagem,
     AplicarEfeitoImagem(&'static str),
@@ -165,12 +187,27 @@ pub enum Msg {
     AlternarMaximizar(window::Id),
     AtalhoJanela(window::Id, keyboard::Key, keyboard::Modifiers),
     BarraPropria(bool),
+    /// (0 = LaTeX, 1 = Markdown, valor)
+    NumerosDeLinha(usize, bool),
+    TemaCodigo(usize, usize),
+    /// O painel de código rolou: (deslocamento, altura visível), para seguir o cursor dele.
+    CodigoRolou(f32, f32),
+    /// O painel lateral: 0 estrutura, 1 arquivos do projeto, 2 o que não foi convertido.
+    Lateral(u8),
+    /// Leva o código LaTeX (e a página) à linha `n` (1…).
+    IrLinhaCodigo(usize),
+    /// Clique num arquivo da lista do projeto.
+    AbrirArquivo(String),
+    FecharArquivo,
+    ZoomArquivo(f32),
     Descartar,
     SalvarEContinuar,
     Cancelar,
     Escuro(bool),
     TemaAuto,
     Acento(usize),
+    /// Troca o idioma da interface (`pt-BR`, `en-US`, `es-ES`).
+    Idioma(&'static str),
     LogoPadrao,
     ConfigSecao(u8),
     AlternarFaixa,
@@ -179,6 +216,7 @@ pub enum Msg {
     /// Liga/desliga uma opção do Localizar: 0 maiúsculas, 1 palavra inteira, 2 expressão regular.
     BuscaOpcao(u8),
     BuscaIr(i32),
+    AlternarSubstituir,
     Substituir(bool),
     /// Ação no editor do painel de código (digitar, clicar, rolar).
     CodigoEditar(iced::widget::text_editor::Action),
@@ -186,6 +224,8 @@ pub enum Msg {
     CodigoPulso,
     CodigoFechar,
     /// Modo de captura (`FEATHERDOCS_CAPTURAR=arquivo.png`): prepara e fotografa.
+    /// Rola a galeria de estilos da faixa (± blocos).
+    GaleriaEstilos(i32),
     CapturarTela,
     TelaCapturada(window::Screenshot),
 }
@@ -207,6 +247,9 @@ pub struct App {
     consulta: String,
     substituicao: String,
     pendente: Option<Destino>,
+    /// Exportação à espera de confirmação: o arquivo escolhido e o que o formato não leva.
+    /// O aviso do que fica de fora: ao exportar para o arquivo, ou (sem arquivo) ao ver o código em Markdown.
+    perdas_exportar: Option<(Option<PathBuf>, Vec<&'static str>)>,
     continuar_apos_salvar: bool,
     menu_aberto: bool,
     cor_ui: EstadoCor,
@@ -219,16 +262,45 @@ pub struct App {
     /// O texto que a pessoa escreveu (o `.tex`/`.md` aberto ou o último código aplicado): o
     /// painel o mostra na forma dela enquanto ele ainda descrever o documento.
     fonte_original: Option<(Fonte, String)>,
+    /// Os arquivos do projeto LaTeX aberto (.zip ou a pasta do .tex), para o painel Estrutura.
+    arquivos_projeto: Vec<String>,
+    rolagem_codigo: (f32, f32),
+    /// A lista do painel lateral (ver `Msg::Lateral`).
+    lateral: u8,
+    /// O que a leitura do LaTeX não converteu: na abertura e a cada código aplicado.
+    avisos_latex: Vec<featherdocs_io::latex::Aviso>,
+    /// O projeto LaTeX aberto (.zip ou .tex), de onde se leem os arquivos da lista.
+    projeto_caminho: Option<PathBuf>,
+    /// Um arquivo do projeto aberto no lugar do código: o nome e o que mostrar.
+    arquivo_visto: Option<(String, Visto)>,
+    zoom_arquivo: f32,
     passo_captura: u8,
     /// O diálogo de formulário aberto (link, nota, cabeçalho, margens…).
     formulario: Option<crate::dialogos::Formulario>,
+    /// A janela Exportar PDF aberta, com o que a pessoa já escolheu.
+    opcoes_pdf: Option<crate::pdf::OpcoesPdf>,
     /// Painel lateral de revisão (estatísticas, comentários, alterações).
     painel_revisao: bool,
+    /// O primeiro bloco visível da galeria de estilos da faixa.
+    pub galeria_estilos: usize,
+    /// Arrastando a seleção com o mouse: a página onde o mouse entra continua a seleção.
+    arrastando: bool,
+    /// O menu aberto por baixo da faixa e o ponto da faixa de onde ele desce.
+    pub menu_faixa: Option<crate::faixa::MenuFaixa>,
+    ponteiro_faixa: iced::Point,
+    ponto_menu_faixa: iced::Point,
+    monitor: feather_ui::monitor::Monitor,
     /// Menu do botão direito aberto, no ponto da janela.
     menu_contexto: Option<iced::Point>,
     /// Quanto a página está rolada: o canvas recebe o mouse em coordenadas do conteúdo.
     rolagem: iced::Vector,
+    /// A versão do documento de que cada quadro saiu: o que ficou longe da vista é refeito ao rolar até ele.
+    versao_dos_quadros: Vec<u64>,
     busca_opcoes: Opcoes,
+    /// "3 de 12" (ou o erro da expressão) da última busca, mostrado no painel.
+    busca_contagem: String,
+    /// A linha de Substituir aberta no painel de busca.
+    substituir_visivel: bool,
     /// A nota sob o botão direito, para o item "Editar nota" do menu.
     nota_contexto: Option<crate::dialogos::Tipo>,
 }
@@ -254,6 +326,7 @@ impl Default for App {
             consulta: String::new(),
             substituicao: String::new(),
             pendente: None,
+            perdas_exportar: None,
             continuar_apos_salvar: false,
             menu_aberto: false,
             cor_ui: EstadoCor::default(),
@@ -262,12 +335,29 @@ impl Default for App {
             ajuda_estado: Default::default(),
             codigo: None,
             fonte_original: None,
+            arquivos_projeto: Vec::new(),
+            rolagem_codigo: (0., 0.),
+            lateral: 0,
+            avisos_latex: Vec::new(),
+            projeto_caminho: None,
+            arquivo_visto: None,
+            zoom_arquivo: 1.,
             passo_captura: 0,
             formulario: None,
+            opcoes_pdf: None,
             painel_revisao: false,
+            galeria_estilos: 0,
+            arrastando: false,
+            menu_faixa: None,
+            ponteiro_faixa: iced::Point::ORIGIN,
+            ponto_menu_faixa: iced::Point::ORIGIN,
+            monitor: feather_ui::monitor::Monitor::novo("FeatherDocs"),
             menu_contexto: None,
             rolagem: iced::Vector::ZERO,
+            versao_dos_quadros: Vec::new(),
             busca_opcoes: Opcoes::default(),
+            busca_contagem: String::new(),
+            substituir_visivel: false,
             nota_contexto: None,
         };
         app.atualizar();
@@ -280,6 +370,7 @@ impl App {
             config: Configuracao::carregar(),
             ..Self::default()
         };
+        crate::localidade::definir(&app.config.idioma);
         definir_tema(escuro_resolvido(app.config.tema_auto, app.config.escuro), app.config.acento);
         feather_ui::marca::definir_marca(feather_ui::marca::Produto::FeatherDocs,
             app.config.logo_usa_acento());
@@ -287,7 +378,7 @@ impl App {
         let inicial = std::env::args_os().nth(1).map(PathBuf::from);
         if inicial.is_some() {
             app.ocupado = true;
-            app.status = "Abrindo documento em segundo plano…".into();
+            app.status = tr("Abrindo documento em segundo plano…").into();
         }
         let (id, abrir) = window::open(window::Settings {
             size: iced::Size::new(1200.0, 800.0),
@@ -315,7 +406,7 @@ impl App {
     async fn carregar_em_background(p: PathBuf) -> Result<(PathBuf, Documento), String> {
         tokio::task::spawn_blocking(move || arquivos::ler(&p).map(|doc| (p, doc)))
             .await
-            .map_err(|e| format!("Falha ao processar documento: {e}"))?
+            .map_err(|e| trf("Falha ao processar documento: {}", &[&e]))?
     }
     fn alternar_aux(&mut self, tipo: JanelaAux) -> Task<Msg> {
         let tamanho = match tipo {
@@ -338,9 +429,9 @@ impl App {
     }
     pub fn titulo(&self, janela: window::Id) -> String {
         match self.janelas.tipo(janela) {
-            Some(JanelaAux::Configuracoes) => return "Configurações do FeatherDocs".into(),
-            Some(JanelaAux::Ajuda) => return "Ajuda do FeatherDocs".into(),
-            Some(JanelaAux::Monitor) => return "Monitor do FeatherDocs".into(),
+            Some(JanelaAux::Configuracoes) => return tr("Configurações do FeatherDocs").into(),
+            Some(JanelaAux::Ajuda) => return tr("Ajuda do FeatherDocs").into(),
+            Some(JanelaAux::Monitor) => return tr("Monitor do FeatherDocs").into(),
             None => {}
         }
         let nome = self
@@ -358,7 +449,28 @@ impl App {
     pub fn tema(&self, _janela: window::Id) -> iced::Theme {
         tema_iced()
     }
+    /// Só o cursor e a seleção mudaram: refaz a visão, sem redesenhar as páginas (o arrasto do mouse
+    /// manda um evento por pixel; refazer todas as páginas a cada um travava a seleção).
+    fn atualizar_cursor(&mut self) {
+        let total = self.sessao.total_de_paginas();
+        self.visao = self.sessao.visao(0, total.saturating_sub(1));
+        self.pagina_ativa = self.visao.cursor.map_or(self.pagina_ativa, |c| c.pagina).min(total.saturating_sub(1));
+        self.sincronizar_codigo();
+    }
+    /// As páginas como saem no papel (sem grade nem marcas de quebra), para o PDF.
+    fn quadros_impressos(&self) -> Vec<Quadro> {
+        // Uma página que falhe fica como na tela, para os links não apontarem para a página errada.
+        (0..self.quadros.len()).map(|p| self.sessao.quadro_impresso(p).and_then(|b| Quadro::ler(&b)).unwrap_or_else(|_| self.quadros[p].clone())).collect()
+    }
+
     fn atualizar(&mut self) {
+        // O que vem de fora do documento: a data de hoje (campo `data`, o `\today`) e o nome do arquivo.
+        let contexto = featherdocs_core::objetos::ContextoExterno {
+            hoje: hoje_por_extenso(),
+            arquivo: self.caminho.as_ref().and_then(|c| c.file_name()).map_or(String::new(), |n| n.to_string_lossy().into_owned()),
+            ..Default::default()
+        };
+        self.sessao.contexto_definir(&contexto);
         let total = self.sessao.total_de_paginas();
         self.visao = self.sessao.visao(0, total.saturating_sub(1));
         self.pagina_ativa = self
@@ -366,43 +478,95 @@ impl App {
             .cursor
             .map_or(self.pagina_ativa, |c| c.pagina)
             .min(total.saturating_sub(1));
-        self.quadros.clear();
-        for p in 0..total {
-            match self
-                .sessao
-                .quadro(p, u64::MAX)
-                .and_then(|b| Quadro::ler(&b))
-            {
-                Ok(q) => {
-                    for o in &q.operacoes {
-                        if let Operacao::Imagem { origem, .. } = o {
-                            if !self.imagens.contains_key(origem) {
-                                if let Some(h) = crate::pagina::carregar_imagem(origem) {
-                                    self.imagens.insert(origem.clone(), h);
-                                }
+        // Página nova ou de tamanho trocado refaz tudo (o tamanho de cada uma posiciona a rolagem);
+        // fora isso, a cada tecla só as páginas perto da vista.
+        let cfg = self.sessao.documento().pagina;
+        let tudo = self.quadros.len() != total || self.quadros.first().is_some_and(|q| q.largura != cfg.largura || q.altura != cfg.altura);
+        if tudo {
+            self.quadros.clear();
+            self.versao_dos_quadros.clear();
+            for p in 0..total {
+                if let Some(q) = self.montar_quadro(p) {
+                    self.quadros.push(q);
+                    self.versao_dos_quadros.push(self.sessao.versao());
+                }
+            }
+        } else {
+            self.refazer_visiveis();
+        }
+        self.sincronizar_codigo();
+    }
+
+    /// Refaz os quadros velhos das páginas que estão perto da vista (e o da página do cursor).
+    fn refazer_visiveis(&mut self) {
+        // shortcut: a altura da vista é estimada (2000 px); com tela maior que isso, a página de baixo pode aparecer velha até a rolagem. Guardar o tamanho da janela se acontecer.
+        const VISTA: f32 = 2000.;
+        let versao = self.sessao.versao();
+        let (topo, fim) = (self.rolagem.y - VISTA, self.rolagem.y + 2. * VISTA);
+        let mut y = 24.;
+        for p in 0..self.quadros.len() {
+            let altura = self.quadros[p].altura * self.config.zoom;
+            let perto = y + altura >= topo && y <= fim || p == self.pagina_ativa;
+            y += altura + 24.;
+            if perto && self.versao_dos_quadros[p] != versao {
+                if let Some(q) = self.montar_quadro(p) {
+                    self.quadros[p] = q;
+                    self.versao_dos_quadros[p] = versao;
+                }
+            }
+        }
+    }
+
+    /// O quadro da página `p` lido do motor, com as imagens dele já carregadas.
+    fn montar_quadro(&mut self, p: usize) -> Option<Quadro> {
+        match self.sessao.quadro(p, u64::MAX).and_then(|b| Quadro::ler(&b)) {
+            Ok(q) => {
+                for o in &q.operacoes {
+                    if let Operacao::Imagem { origem, .. } = o {
+                        if !self.imagens.contains_key(origem) {
+                            if let Some(h) = crate::pagina::carregar_imagem(origem) {
+                                self.imagens.insert(origem.clone(), h);
                             }
                         }
                     }
-                    self.quadros.push(q);
                 }
-                Err(e) => self.status = e,
+                Some(q)
+            }
+            Err(e) => {
+                self.status = e;
+                None
             }
         }
-        self.sincronizar_codigo();
     }
     fn carregar(&mut self, p: PathBuf, d: Documento) {
         self.config.lembrar(&p);
         self.sessao = Sessao::com_documento(d);
+        // A sessão nova recomeça a contagem de versões: os quadros da anterior não valem mais.
+        self.quadros.clear();
         self.sessao.marcar_gravado();
         // O texto de um .tex/.md aberto aparece no painel de código como a pessoa o escreveu.
         let ext = p.extension().and_then(|s| s.to_str()).map(str::to_ascii_lowercase);
         let fonte = match ext.as_deref() {
             Some("tex") => Some(Fonte::Latex),
             Some("md") => Some(Fonte::Markdown),
+            Some("zip") => Some(Fonte::Latex),
             _ => None,
         };
-        self.fonte_original = fonte
-            .and_then(|f| std::fs::read_to_string(&p).ok().map(|t| (f, t)));
+        // Do .zip, o texto é o do .tex principal de dentro. O LaTeX diz também o que não converteu.
+        let lido = match ext.as_deref() {
+            Some("zip") => std::fs::read(&p).ok().and_then(|b| featherdocs_io::latex::projeto::ler_zip(&b).ok()).map(|(l, t)| (t, l.avisos)),
+            Some("tex") => std::fs::read_to_string(&p).ok().map(|t| {
+                let avisos = featherdocs_io::latex::ler_na_pasta(&t, p.parent()).avisos;
+                (t, avisos)
+            }),
+            _ => std::fs::read_to_string(&p).ok().map(|t| (t, Vec::new())),
+        };
+        let (texto, avisos) = lido.map_or((None, Vec::new()), |(t, a)| (Some(t), a));
+        self.avisos_latex = avisos;
+        self.fonte_original = fonte.zip(texto);
+        self.arquivos_projeto = if fonte == Some(Fonte::Latex) { featherdocs_io::latex::projeto::arquivos_do_projeto(&p) } else { Vec::new() };
+        self.projeto_caminho = (fonte == Some(Fonte::Latex)).then(|| p.clone());
+        self.arquivo_visto = None;
         if let (Some(f), Some(painel)) = (fonte, self.codigo.as_mut()) {
             painel.fonte = f;
         }
@@ -438,6 +602,7 @@ impl App {
         match d {
             Destino::Novo => {
                 self.sessao = Sessao::default();
+                self.quadros.clear();
                 self.caminho = None;
                 self.fonte_original = None;
                 if let Some(painel) = self.codigo.as_mut() {
@@ -460,8 +625,8 @@ impl App {
                 self.ocupado = true;
                 Task::perform(
                     async {
-                        let p = rfd::AsyncFileDialog::new()
-                            .add_filter("Documentos", &["fdoz", "docx", "md", "tex"])
+                        let p = dialogo_de_arquivo()
+                            .add_filter("Documentos", &["fdoz", "docx", "md", "tex", "zip"])
                             .pick_file()
                             .await;
                         match p {
@@ -477,25 +642,31 @@ impl App {
         }
     }
     fn salvar(&mut self, como: bool, exportar: bool) -> Task<Msg> {
+        let p = if como || exportar { None } else { self.caminho.clone() };
+        self.salvar_em(p, exportar, false)
+    }
+    /// Salva (ou exporta) em `p`, ou no arquivo que a pessoa escolher; `confirmado` = ela já viu
+    /// o aviso do que o formato não leva.
+    fn salvar_em(&mut self, p: Option<PathBuf>, exportar: bool, confirmado: bool) -> Task<Msg> {
         if self.ocupado {
             return Task::none();
         }
         self.ocupado = true;
-        let p = if como || exportar {
-            None
-        } else {
-            self.caminho.clone()
-        };
+        // A vertente do documento: o .tex/.md aberto é código; o resto é o documento da página.
+        let vertente = self.vertente();
         let doc = self.sessao.documento().clone();
         let versao = self.sessao.versao();
         // O PDF sai das páginas já compostas (as mesmas da tela), não do documento.
-        let quadros = if exportar { self.quadros.clone() } else { Vec::new() };
+        let quadros = if exportar { self.quadros_impressos() } else { Vec::new() };
+        let (links, marcadores) = if exportar { (self.sessao.links_do_pdf(), self.sessao.marcadores_do_pdf()) } else { Default::default() };
+        let opcoes_pdf = crate::pdf::OpcoesPdf::do_documento(&doc.meta.titulo, &doc.meta.autor);
+        let origem = self.caminho.clone();
         Task::perform(
             async move {
                 let p = if let Some(p) = p {
                     Some(p)
                 } else {
-                    let dialogo = rfd::AsyncFileDialog::new().set_file_name(if exportar {
+                    let dialogo = dialogo_de_arquivo().set_file_name(if exportar {
                         "documento.docx"
                     } else {
                         "documento.fdoz"
@@ -506,18 +677,19 @@ impl App {
                             .add_filter("PDF", &["pdf"])
                             .add_filter("Markdown", &["md"])
                             .add_filter("LaTeX", &["tex"])
+                            .add_filter(tr("Projeto LaTeX (.zip)"), &["zip"])
                     } else {
                         dialogo.add_filter("FeatherDocs", &["fdoz"])
                     };
                     dialogo.save_file().await.map(|f| f.path().to_path_buf())
                 };
                 let Some(mut p) = p else {
-                    return Ok(None);
+                    return Ok(Ok(None));
                 };
                 if p.extension().is_none() {
                     p.set_extension(if exportar { "docx" } else { "fdoz" });
                     if p.exists() {
-                        return Err("O arquivo já existe. Selecione seu nome completo no diálogo para confirmar a substituição.".into());
+                        return Err(tr("O arquivo já existe. Selecione seu nome completo no diálogo para confirmar a substituição.").into());
                     }
                 }
                 if !exportar
@@ -526,13 +698,22 @@ impl App {
                         .and_then(|s| s.to_str())
                         .is_some_and(|s| s.eq_ignore_ascii_case("fdoz"))
                 {
-                    return Err("Para salvar o documento, escolha um arquivo .fdoz. Use Exportar para outros formatos.".into());
+                    return Err(tr("Para salvar o documento, escolha um arquivo .fdoz. Use Exportar para outros formatos.").into());
+                }
+                if exportar && !confirmado {
+                    let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("").to_ascii_lowercase();
+                    let perdas = featherdocs_io::conversao::perdas(&doc, vertente, &ext);
+                    if !perdas.is_empty() {
+                        return Ok(Err((p, perdas)));
+                    }
                 }
                 // Serialização e escrita podem durar segundos; executar em worker.
                 tokio::task::spawn_blocking(move || {
                     let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("docx");
                     let b = if ext.eq_ignore_ascii_case("pdf") {
-                        crate::pdf::gerar(&quadros)?
+                        crate::pdf::gerar_com(&quadros, &opcoes_pdf, &links, &marcadores)?
+                    } else if ext.eq_ignore_ascii_case("fdoz") {
+                        arquivos::com_historico(arquivos::bytes(&doc, ext)?, &p, origem.as_deref())?
                     } else {
                         arquivos::bytes(&doc, ext)?
                     };
@@ -540,12 +721,72 @@ impl App {
                     Ok::<_, String>(Some((p, versao, exportar)))
                 })
                 .await
-                .map_err(|e| format!("Falha ao salvar documento: {e}"))?
+                .map_err(|e| trf("Falha ao salvar documento: {}", &[&e]))?
+                .map(Ok)
             },
-            Msg::Gravado,
+            |r: Result<Result<Option<(PathBuf, u64, bool)>, (PathBuf, Vec<&'static str>)>, String>| match r {
+                Ok(Err((p, perdas))) => Msg::PerdasAoExportar(p, perdas),
+                Ok(Ok(x)) => Msg::Gravado(Ok(x)),
+                Err(e) => Msg::Gravado(Err(e)),
+            },
         )
     }
+    /// O aviso antes de exportar para um formato que não leva tudo, com a lista do que fica de fora.
+    fn view_perdas<'a>(&'a self, p: Option<&'a std::path::Path>, perdas: &'a [&'static str]) -> Element<'a, Msg> {
+        let nome = p.and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned());
+        let mut lista = column![].spacing(6);
+        for chave in perdas {
+            lista = lista.push(row![icone("alert-triangle", 14.), text(tr(featherdocs_io::conversao::descricao(chave))).size(13)].spacing(8).align_y(iced::Alignment::Center));
+        }
+        container(
+            column![
+                text(tr("Este formato não leva tudo do documento")).size(19),
+                text(match &nome {
+                    Some(nome) => trf("Ao exportar {}, isto fica de fora:", &[nome]),
+                    None => tr("O código em Markdown não tem isto; o que for editado nele perde:").into(),
+                })
+                .size(13),
+                lista,
+                row![
+                    button(text(tr(if nome.is_some() { "Exportar mesmo assim" } else { "Ver em Markdown mesmo assim" })))
+                        .on_press(Msg::ExportarMesmoAssim)
+                        .style(estilo_botao_primario),
+                    button(text(tr("cancelar"))).on_press(Msg::FecharPerdas).style(estilo_botao_secundario),
+                ]
+                .spacing(10)
+            ]
+            .spacing(15)
+            .max_width(640),
+        )
+        .padding(30)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
+    }
+    /// Cada mensagem; o que mudou na barra de status vai também para o Console do F12.
     pub fn update(&mut self, msg: Msg) -> Task<Msg> {
+        let antes = self.status.clone();
+        let linha_antes = self.codigo.as_ref().map(|p| p.conteudo.cursor_position().0);
+        let mut tarefa = self.update_interno(msg);
+        // O editor fica dentro de uma barra de rolagem (para ter os números de linha ao lado): quando
+        // o cursor dele vai para uma linha fora da vista, a rolagem vai junto.
+        if let Some(linha) = self.codigo.as_ref().map(|p| p.conteudo.cursor_position().0).filter(|l| Some(*l) != linha_antes) {
+            let (topo, altura) = self.rolagem_codigo;
+            let altura = if altura > 0. { altura } else { 400. };
+            let y = painel_codigo::PADDING + linha as f32 * painel_codigo::ALTURA_DA_LINHA;
+            if y < topo || y + painel_codigo::ALTURA_DA_LINHA > topo + altura {
+                let destino = scrollable::AbsoluteOffset { x: 0., y: (y - altura / 3.).max(0.) };
+                tarefa = Task::batch([tarefa, scrollable::scroll_to(scrollable::Id::new("codigo"), destino)]);
+            }
+        }
+        if self.status != antes && !self.status.is_empty() {
+            let nivel = feather_ui::monitor::Nivel::da_mensagem(&self.status);
+            self.monitor.registrar(nivel, "FeatherDocs", &self.status.clone());
+            return Task::batch([tarefa, self.monitor.acompanhar()]);
+        }
+        tarefa
+    }
+    fn update_interno(&mut self, msg: Msg) -> Task<Msg> {
         if (self.ocupado || self.pendente.is_some())
             && matches!(
                 msg,
@@ -594,7 +835,22 @@ impl App {
         }
         let mut tarefa = Task::none();
         match msg {
-            Msg::Comando(c) => return self.comando(c),
+            Msg::Comando(c) => {
+                self.menu_faixa = None;
+                return self.comando(c);
+            }
+            Msg::MenuFaixa(m) => {
+                self.menu_faixa = m;
+                self.ponto_menu_faixa = self.ponteiro_faixa;
+                return Task::none();
+            }
+            Msg::PonteiroFaixa(p) => {
+                self.ponteiro_faixa = p;
+                return Task::none();
+            }
+            Msg::GaleriaEstilos(passo) => {
+                self.galeria_estilos = self.galeria_estilos.saturating_add_signed(passo as isize);
+            }
             Msg::CodigoFechar => {
                 self.codigo = None;
                 self.foco_documento = true;
@@ -656,6 +912,7 @@ impl App {
                     Some("Ctrl+O") => self.comando(Comando::Abrir),
                     Some("Ctrl+Shift+S") => self.comando(Comando::SalvarComo),
                     Some("Ctrl+S") => self.comando(Comando::Salvar),
+                    Some("Ctrl+P") => self.comando(Comando::ExportarPdf),
                     Some("Ctrl+C") => self.update(Msg::Atalho(Comando::Copiar)),
                     Some("Ctrl+X") => self.update(Msg::Atalho(Comando::Recortar)),
                     Some("Ctrl+V") => self.update(Msg::Atalho(Comando::Colar)),
@@ -670,6 +927,58 @@ impl App {
                 self.config.barra_propria = valor;
                 self.config.gravar();
             }
+            Msg::NumerosDeLinha(f, valor) => {
+                self.config.numeros_de_linha[f] = valor;
+                self.config.gravar();
+            }
+            Msg::TemaCodigo(f, i) => {
+                self.config.tema_codigo[f] = i;
+                self.config.gravar();
+            }
+            Msg::CodigoRolou(y, altura) => self.rolagem_codigo = (y, altura),
+            Msg::Lateral(v) => self.lateral = v,
+            Msg::IrLinhaCodigo(n) => {
+                self.arquivo_visto = None;
+                if self.fonte_do_codigo() != Some(Fonte::Latex) {
+                    self.alternar_codigo(Fonte::Latex);
+                }
+                if let Some(painel) = self.codigo.as_mut() {
+                    painel.ir_a_linha(n.saturating_sub(1));
+                    // A página vai junto, ao bloco daquela linha.
+                    if let Some(id) = painel.bloco_da_linha(n.saturating_sub(1)) {
+                        painel.bloco_marcado = Some(id);
+                        self.sessao.ir_para_bloco(id);
+                        tarefa = self.rolar_ao_cursor();
+                    }
+                }
+            }
+            Msg::AbrirArquivo(nome) => {
+                if nome.to_ascii_lowercase().ends_with(".tex") {
+                    self.arquivo_visto = None;
+                    if self.fonte_do_codigo() != Some(Fonte::Latex) {
+                        self.alternar_codigo(Fonte::Latex);
+                    }
+                } else {
+                    let bytes = self.projeto_caminho.as_deref().and_then(|p| featherdocs_io::latex::projeto::ler_arquivo(p, &nome));
+                    let imagem = ["png", "jpg", "jpeg", "gif", "webp", "svg"].iter().any(|x| nome.to_ascii_lowercase().ends_with(&format!(".{x}")));
+                    let visto = match bytes {
+                        None => Visto::Aviso(tr("Não consegui ler este arquivo do projeto.").into()),
+                        Some(b) if imagem => crate::imagem_compartilhada::original_para_zoom(&b)
+                            // shortcut: SVG/GIF vão pela prévia com tamanho suposto de 800×600; medir o SVG se precisar.
+                            .or_else(|| crate::pagina::carregar_imagem(&featherdocs_io::latex::projeto::data_url_da_imagem(&nome, &b)).map(|h| (h, 800, 600)))
+                            .map_or_else(|| Visto::Aviso(tr("Esta imagem não pode ser mostrada.").into()), |(h, w, a)| Visto::Imagem(h, w, a)),
+                        Some(b) => match String::from_utf8(b) {
+                            Ok(t) => Visto::Texto(t),
+                            Err(_) => Visto::Aviso(tr("Arquivo binário: não há texto para mostrar.").into()),
+                        },
+                    };
+                    self.arquivo_visto = Some((nome, visto));
+                    self.zoom_arquivo = 1.;
+                }
+            }
+            Msg::FecharArquivo => self.arquivo_visto = None,
+            // 0 = ajustar ao painel; senão multiplica (1 = a imagem inteira cabendo no painel).
+            Msg::ZoomArquivo(f) => self.zoom_arquivo = if f == 0. { 1. } else { (self.zoom_arquivo * f).clamp(0.1, 20.) },
             Msg::SalvarEContinuar => {
                 self.continuar_apos_salvar = true;
                 return self.salvar(false, false);
@@ -682,9 +991,10 @@ impl App {
             Msg::Cancelar => {
                 if self.sessao.pincel_cheio() {
                     self.sessao.pincel_cancelar();
-                    self.status = "Pincel cancelado".into();
+                    self.status = tr("Pincel cancelado").into();
                 }
                 self.pendente = None;
+                self.opcoes_pdf = None;
                 self.continuar_apos_salvar = false;
                 self.menu_aberto = false;
                 self.cor_ui.alvo = None;
@@ -714,12 +1024,18 @@ impl App {
                 feather_ui::marca::definir_marca(feather_ui::marca::Produto::FeatherDocs,true);
                 self.config.gravar();
             }
+            Msg::Idioma(codigo) => {
+                self.config.idioma = codigo.to_string();
+                crate::localidade::definir(codigo);
+                self.config.gravar();
+                return Task::none();
+            }
             Msg::LogoPadrao => {
                 self.config.marca_personalizada = Some(false);
                 feather_ui::marca::definir_marca(feather_ui::marca::Produto::FeatherDocs,false);
                 self.config.gravar();
             }
-            Msg::ConfigSecao(s) => self.config_secao = s.min(5),
+            Msg::ConfigSecao(s) => self.config_secao = s.min(7),
             Msg::AjudaEvento(e) => self.ajuda_estado.atualizar(e, ajuda::modelo()),
             Msg::AlternarFaixa => {
                 self.config.faixa_recolhida = !self.config.faixa_recolhida;
@@ -730,9 +1046,27 @@ impl App {
                 match r {
                     Ok(Some((p, d))) => self.carregar(p, d),
                     Ok(None) => {
-                        self.status = "Abertura cancelada; documento preservado".into();
+                        self.status = tr("Abertura cancelada; documento preservado").into();
                     }
                     Err(e) => self.status = e,
+                }
+            }
+            Msg::PerdasAoExportar(p, perdas) => {
+                self.ocupado = false;
+                self.perdas_exportar = Some((Some(p), perdas));
+            }
+            Msg::ExportarMesmoAssim => {
+                match self.perdas_exportar.take() {
+                    Some((Some(p), _)) => return self.salvar_em(Some(p), true, true),
+                    Some((None, _)) => self.mostrar_codigo(Fonte::Markdown),
+                    None => {}
+                }
+            }
+            Msg::FecharPerdas => self.perdas_exportar = None,
+            Msg::OpcoesPdf(o) => self.opcoes_pdf = Some(o),
+            Msg::ConfirmarPdf => {
+                if let Some(o) = self.opcoes_pdf.take() {
+                    return self.exportar_pdf(o);
                 }
             }
             Msg::Gravado(r) => {
@@ -781,14 +1115,14 @@ impl App {
                         });
                     match origem {
                         Some(origem) => self.efeito_imagem = Some((id, origem, "original")),
-                        None => self.status = "Selecione uma imagem PNG/JPEG embutida para editar.".into(),
+                        None => self.status = tr("Selecione uma imagem PNG/JPEG embutida para editar.").into(),
                     }
                 }
             }
             Msg::AplicarEfeitoImagem(chave) => {
                 if let Some((id, origem, _)) = self.efeito_imagem.clone() {
                     let result = feather_image::EfeitoRapido::da_chave(chave)
-                        .ok_or_else(|| "Efeito de imagem desconhecido.".to_string())
+                        .ok_or_else(|| tr("Efeito de imagem desconhecido.").to_string())
                         .and_then(|preset|
                             crate::imagem_compartilhada::aplicar_efeito_embutido(&origem, preset)
                         )
@@ -797,7 +1131,7 @@ impl App {
                         Ok(()) => {
                             self.imagens.clear();
                             self.efeito_imagem = Some((id, origem, chave));
-                            self.status = format!("Efeito de imagem aplicado: {chave}");
+                            self.status = trf("Efeito de imagem aplicado: {}", &[&chave]);
                         }
                         Err(erro) => self.status = erro,
                     }
@@ -818,6 +1152,8 @@ impl App {
             }
             Msg::Clicar(p, x, y, shift, n) if !self.ocupado && self.pendente.is_none() => {
                 self.foco_documento = true;
+                self.arrastando = true;
+                let versao = self.sessao.versao();
                 // A página manda: o cursor do código vai ao bloco clicado (em `atualizar`).
                 if let Some(painel) = self.codigo.as_mut() {
                     painel.bloco_marcado = None;
@@ -836,8 +1172,21 @@ impl App {
                 if shift && self.sessao.pincel_cheio() && !self.sessao.cursor().vazio() {
                     self.sessao.pincel_aplicar();
                     self.sessao.pincel_cancelar();
-                    self.status = "Pincel aplicado à seleção".into();
+                    self.status = tr("Pincel aplicado à seleção").into();
                 }
+                if self.sessao.versao() == versao && self.quadros.len() == self.sessao.total_de_paginas() {
+                    self.atualizar_cursor();
+                    return Task::none();
+                }
+            }
+            Msg::MonitorEvento(e) => return self.monitor.atualizar(e),
+            Msg::MonitorPulso => {
+                self.monitor.amostrar();
+                return Task::none();
+            }
+            Msg::Soltar => {
+                self.arrastando = false;
+                return Task::none();
             }
             Msg::Tecla(k, m, t)
                 if self.foco_documento && !self.ocupado && self.pendente.is_none() =>
@@ -846,17 +1195,22 @@ impl App {
                     && k == keyboard::Key::Named(keyboard::key::Named::Escape)
                 {
                     self.sessao.pincel_cancelar();
-                    self.status = "Pincel cancelado".into();
+                    self.status = tr("Pincel cancelado").into();
                     return Task::none();
                 }
                 let nome = nome_tecla(&k);
+                let antes = (self.sessao.versao(), *self.sessao.cursor());
                 let r = self.sessao.tecla(&nome, m.control(), m.shift(), m.alt());
                 if !r.tratada && (!m.control() || m.alt()) {
                     if let Some(t) = t.filter(|t| !t.chars().any(char::is_control)) {
                         self.sessao.inserir_texto(&t);
                     }
                 }
-                tarefa = self.rolar_ao_cursor();
+                // Só segue o cursor se a tecla mexeu nele ou no texto: o Ctrl sozinho (do zoom com a
+                // roda) levava a tela de volta ao cursor, que depois de abrir fica na primeira página.
+                if antes != (self.sessao.versao(), *self.sessao.cursor()) {
+                    tarefa = self.rolar_ao_cursor();
+                }
             }
             Msg::Colado(Some(t)) if !self.ocupado && self.pendente.is_none() => {
                 self.sessao.colar(&t);
@@ -865,10 +1219,10 @@ impl App {
                 self.ocupado = false;
                 match r {
                     Ok(Some((p, antigo))) => {
-                        let rotulo = p.file_name().and_then(|n| n.to_str()).unwrap_or("outro arquivo").to_string();
+                        let rotulo = p.file_name().and_then(|n| n.to_str()).unwrap_or(tr("outro arquivo")).to_string();
                         self.sessao.comparar_com(&antigo, &rotulo);
                         self.painel_revisao = true;
-                        self.status = format!("Diferenças em relação a {rotulo} marcadas como alterações");
+                        self.status = trf("Diferenças em relação a {} marcadas como alterações", &[&rotulo]);
                     }
                     Ok(None) => {}
                     Err(e) => self.status = e,
@@ -887,7 +1241,12 @@ impl App {
             Msg::ComentarioExcluir(id) => {
                 self.sessao.comentario_excluir(id);
             }
-            Msg::Rolou(v) => self.rolagem = v,
+            // Rolar não muda o documento: nada de redesenhar as páginas a cada passo da roda.
+            Msg::Rolou(v) => {
+                self.rolagem = v;
+                self.refazer_visiveis();
+                return Task::none();
+            }
             Msg::BotaoDireito(p, x, y, abs) => {
                 self.foco_documento = true;
                 self.pagina_ativa = p;
@@ -899,6 +1258,7 @@ impl App {
             Msg::AbrirLink => {
                 if let Some(link) = self.sessao.link_no_cursor() {
                     self.seguir_link(&link);
+                    tarefa = self.rolar_ao_cursor();
                 }
             }
             Msg::DoMenu(m) => {
@@ -908,9 +1268,16 @@ impl App {
             Msg::CtrlClique(p, x, y) => {
                 self.foco_documento = true;
                 self.pagina_ativa = p;
+                // A linha do sumário leva ao título dela (como o link do `\ref`).
+                if let Some(id) = self.sessao.alvo_do_sumario(p, y) {
+                    self.sessao.ir_para_bloco(id);
+                    return self.rolar_ao_cursor();
+                }
                 self.sessao.clicar(p, x, y, false, 1);
                 if let Some(link) = self.sessao.link_no_cursor() {
                     self.seguir_link(&link);
+                    // O link interno leva o cursor ao destino; a tela vai junto.
+                    tarefa = self.rolar_ao_cursor();
                 }
             }
             Msg::BibLido(r) => {
@@ -919,10 +1286,10 @@ impl App {
                     Ok(Some(t)) => {
                         let fontes = featherdocs_io::bib::ler(&t);
                         if fontes.is_empty() {
-                            self.status = "Nenhuma referência reconhecida no .bib".into();
+                            self.status = tr("Nenhuma referência reconhecida no .bib").into();
                         } else {
                             let (_, n) = self.sessao.fontes_importar(fontes);
-                            self.status = format!("{n} fonte(s) importada(s) do .bib");
+                            self.status = trf("{} fonte(s) importada(s) do .bib", &[&n]);
                         }
                     }
                     Ok(None) => {}
@@ -1036,18 +1403,24 @@ impl App {
                 self.consulta = s;
                 self.foco_documento = false;
                 let r = self.sessao.busca_definir(&self.consulta, self.busca_opcoes);
-                self.status = r
-                    .erro
-                    .unwrap_or_else(|| format!("{} / {}", r.atual, r.total));
+                self.busca_contagem = match (r.erro, r.total) {
+                    (Some(e), _) => e,
+                    (None, 0) if !self.consulta.is_empty() => tr("Nenhum resultado").into(),
+                    (None, 0) => String::new(),
+                    (None, t) => trf("{} de {}", &[&r.atual.to_string(), &t.to_string()]),
+                };
                 tarefa = self.rolar_ao_cursor();
             }
+            Msg::AlternarSubstituir => self.substituir_visivel = !self.substituir_visivel,
             Msg::Substituicao(s) => {
                 self.substituicao = s;
                 self.foco_documento = false;
             }
             Msg::BuscaIr(d) => {
                 let r = self.sessao.busca_ir(d);
-                self.status = format!("{} / {}", r.atual, r.total);
+                if r.total > 0 {
+                    self.busca_contagem = trf("{} de {}", &[&r.atual.to_string(), &r.total.to_string()]);
+                }
                 tarefa = self.rolar_ao_cursor();
             }
             Msg::Substituir(tudo) => {
@@ -1073,6 +1446,11 @@ impl App {
             Comando::Salvar => return self.salvar(false, false),
             Comando::SalvarComo => return self.salvar(true, false),
             Comando::Exportar => return self.salvar(true, true),
+            Comando::ExportarPdf => {
+                let meta = &self.sessao.documento().meta;
+                self.menu_aberto = false;
+                self.opcoes_pdf = Some(crate::pdf::OpcoesPdf::do_documento(&meta.titulo, &meta.autor));
+            }
             Comando::Desfazer => {
                 self.sessao.desfazer();
             }
@@ -1096,10 +1474,10 @@ impl App {
                 self.ocupado = true;
                 return Task::perform(
                     async {
-                        let Some(p) = rfd::AsyncFileDialog::new().add_filter("BibTeX", &["bib"]).pick_file().await else {
+                        let Some(p) = dialogo_de_arquivo().add_filter("BibTeX", &["bib"]).pick_file().await else {
                             return Ok(None);
                         };
-                        std::fs::read_to_string(p.path()).map(Some).map_err(|e| format!("Não consegui ler o .bib: {e}"))
+                        std::fs::read_to_string(p.path()).map(Some).map_err(|e| trf("Não consegui ler o .bib: {}", &[&e]))
                     },
                     Msg::BibLido,
                 );
@@ -1158,7 +1536,7 @@ impl App {
             Comando::Proteger => {
                 let sim = !self.sessao.documento().extras.protegido;
                 self.sessao.proteger(sim);
-                self.status = if sim { "Documento protegido: só leitura e comentários" } else { "Proteção retirada" }.into();
+                self.status = tr(if sim { "Documento protegido: só leitura e comentários" } else { "Proteção retirada" }).into();
             }
             Comando::Posicao(p) => {
                 self.sessao.posicao_alternar(p);
@@ -1204,14 +1582,14 @@ impl App {
                 if self.sessao.pincel_cheio() {
                     if !self.sessao.cursor().vazio() {
                         self.sessao.pincel_aplicar();
-                        self.status = "Pincel aplicado à seleção".into();
+                        self.status = tr("Pincel aplicado à seleção").into();
                     } else {
-                        self.status = "Pincel cancelado".into();
+                        self.status = tr("Pincel cancelado").into();
                     }
                     self.sessao.pincel_cancelar();
                 } else {
                     self.sessao.pincel_copiar();
-                    self.status = "Pincel ativo: selecione o destino com Shift+clique; Esc cancela.".into();
+                    self.status = tr("Pincel ativo: selecione o destino com Shift+clique; Esc cancela.").into();
                 }
             }
             Comando::Formato(bit) => {
@@ -1221,7 +1599,7 @@ impl App {
                 let id = self.sessao.estilo_com_nome_no_cursor();
                 let nome = self.sessao.documento().estilos.pegar(id).map(|e| e.nome.clone());
                 let r = match (nome, &c) {
-                    (None, _) => Err("O cursor não está num parágrafo com estilo com nome.".to_string()),
+                    (None, _) => Err(tr("O cursor não está num parágrafo com estilo com nome.").to_string()),
                     (Some(nome), Comando::EstiloAtualizar) => self.sessao
                         .estilo_modificar(id, crate::dialogos::estilo_do_cursor(&self.sessao, &nome)).map(|_| ()),
                     _ => self.sessao.estilo_excluir(id).map(|_| ()),
@@ -1300,7 +1678,7 @@ impl App {
                 self.ocupado = true;
                 return Task::perform(
                     async {
-                        let Some(p) = rfd::AsyncFileDialog::new()
+                        let Some(p) = dialogo_de_arquivo()
                             .add_filter("Imagens", &["png", "jpg", "jpeg"])
                             .pick_file()
                             .await
@@ -1308,12 +1686,20 @@ impl App {
                             return Ok(None);
                         };
                         let bytes = std::fs::read(p.path())
-                            .map_err(|e| format!("Não consegui ler a imagem: {e}"))?;
+                            .map_err(|e| trf("Não consegui ler a imagem: {}", &[&e]))?;
                         let imagem = crate::imagem_compartilhada::preparar_insercao(&bytes)?;
                         Ok(Some(imagem))
                     },
                     Msg::Imagem,
                 );
+            }
+            Comando::QuebraDeLinha => {
+                self.sessao.inserir_texto(&featherdocs_core::modelo::QUEBRA_DE_LINHA.to_string());
+            }
+            Comando::EstiloRapido(k) => {
+                if let Err(e) = crate::dialogos::aplicar_rapido(&mut self.sessao, k) {
+                    self.status = e;
+                }
             }
             Comando::Quebra => {
                 self.sessao.inserir_bloco("quebra_de_pagina");
@@ -1341,8 +1727,8 @@ impl App {
                 self.ocupado = true;
                 return Task::perform(
                     async {
-                        let Some(p) = rfd::AsyncFileDialog::new()
-                            .add_filter("Documentos", &["fdoz", "docx", "md", "tex"])
+                        let Some(p) = dialogo_de_arquivo()
+                            .add_filter("Documentos", &["fdoz", "docx", "md", "tex", "zip"])
                             .pick_file()
                             .await
                         else {
@@ -1365,7 +1751,7 @@ impl App {
             }
             Comando::Codigo(fonte) => self.alternar_codigo(fonte),
             Comando::Zoom(d) => {
-                self.config.zoom = (self.config.zoom + d).clamp(0.5, 2.);
+                self.config.zoom = ((self.config.zoom + d) * 100.).round().clamp(50., 200.) / 100.;
                 self.config.gravar();
             }
             Comando::Configuracoes => {
@@ -1378,13 +1764,16 @@ impl App {
                 return self.alternar_aux(JanelaAux::Ajuda);
             }
             Comando::Monitor => {
+                self.monitor.amostrar();
                 self.menu_aberto = false;
                 return self.alternar_aux(JanelaAux::Monitor);
             }
             Comando::Buscar => {
                 self.busca = !self.busca;
                 self.foco_documento = !self.busca;
-                if !self.busca {
+                if self.busca {
+                    tarefa = iced::widget::text_input::focus(iced::widget::text_input::Id::new("busca"));
+                } else {
                     self.sessao.busca_limpar();
                 }
             }
@@ -1398,6 +1787,15 @@ impl App {
     }
 
     /// Liga o painel nesta língua, troca de língua ou, na mesma, desliga.
+    /// A vertente do documento: o .tex/.md aberto é código; o resto é o documento da página.
+    fn vertente(&self) -> featherdocs_io::conversao::Vertente {
+        match self.fonte_original.as_ref().map(|(f, _)| *f) {
+            Some(Fonte::Latex) => featherdocs_io::conversao::Vertente::Latex,
+            Some(Fonte::Markdown) => featherdocs_io::conversao::Vertente::Markdown,
+            None => featherdocs_io::conversao::Vertente::Convencional,
+        }
+    }
+
     fn alternar_codigo(&mut self, fonte: Fonte) {
         self.aplicar_codigo();
         if self.fonte_do_codigo() == Some(fonte) {
@@ -1405,16 +1803,24 @@ impl App {
             self.foco_documento = true;
             return;
         }
+        // O Markdown não guarda layout, tabelas mescladas etc.: editar nele apagaria isso do documento.
+        if fonte == Fonte::Markdown {
+            let perdas = featherdocs_io::conversao::perdas(self.sessao.documento(), self.vertente(), "md");
+            if !perdas.is_empty() {
+                self.perdas_exportar = Some((None, perdas));
+                return;
+            }
+        }
+        self.mostrar_codigo(fonte);
+    }
+
+    fn mostrar_codigo(&mut self, fonte: Fonte) {
         let inicio = Instant::now();
         let mapa = painel_codigo::gerar(self.sessao.documento(), fonte, self.fonte_original.as_ref());
         let mut painel = PainelCodigo::novo(fonte, mapa, self.sessao.versao());
         painel.ir_ao_bloco(self.sessao.cursor().foco.bloco);
         self.codigo = Some(painel);
-        self.status = format!(
-            "Código {} gerado em {} ms",
-            painel_codigo::nome_da_fonte(fonte),
-            inicio.elapsed().as_millis()
-        );
+        self.status = trf("Código {} gerado em {} ms", &[&painel_codigo::nome_da_fonte(fonte), &inicio.elapsed().as_millis()]);
     }
 
     /// Manda ao motor o código digitado (se houver): relê, troca só os blocos que mudaram e
@@ -1427,26 +1833,38 @@ impl App {
         let fonte = painel.fonte;
         let texto = painel.conteudo.text();
         if self.sessao.modo_edicao() == "leitura" {
-            self.status = "O documento está só para leitura: o código não foi aplicado.".into();
+            self.status = tr("O documento está só para leitura: o código não foi aplicado.").into();
             painel.versao = u64::MAX;
             return;
         }
         let inicio = Instant::now();
         let versao_antes = self.sessao.versao();
         let r = featherdocs_io::dividido::reconciliar(self.sessao.documento(), fonte, &texto);
+        if fonte == Fonte::Latex {
+            self.avisos_latex = r.avisos.clone();
+        }
         let mudanca = self.sessao.trocar_blocos(r.blocos, r.meta, r.numeracao);
+        // O papel e as margens que o código escreve valem para a página (Layout mostra o mesmo).
+        if let Some(p) = r.pagina.filter(|p| !featherdocs_io::dividido::mesma_pagina(p, &self.sessao.documento().pagina)) {
+            let margens = |s: &mut Sessao| s.margens_definir(p.margem_esq, p.margem_dir, p.margem_sup, p.margem_inf);
+            // A ordem importa: papel menor só cabe depois de margens menores, e o contrário.
+            let ok = self.sessao.papel_personalizado(p.largura, p.altura).and_then(|_| margens(&mut self.sessao))
+                .or_else(|_| margens(&mut self.sessao).and_then(|_| self.sessao.papel_personalizado(p.largura, p.altura)));
+            if let Err(e) = ok {
+                self.status = e;
+            }
+        }
+        if let Some(e) = r.extras {
+            self.sessao.mudar_extras(|x| *x = e);
+        }
         painel.blocos = featherdocs_io::exportar::mapa_de_texto(&texto, self.sessao.documento(), fonte).blocos;
         painel.versao = self.sessao.versao();
         painel.bloco_marcado = painel.bloco_da_linha(painel.conteudo.cursor_position().0);
         self.status = if self.sessao.versao() == versao_antes {
             String::new()
         } else {
-            format!(
-                "Código {} aplicado: {} bloco(s) em {} ms",
-                painel_codigo::nome_da_fonte(fonte),
-                mudanca.afetados.len(),
-                inicio.elapsed().as_millis()
-            )
+            trf("Código {} aplicado: {} bloco(s) em {} ms",
+                &[&painel_codigo::nome_da_fonte(fonte), &mudanca.afetados.len(), &inicio.elapsed().as_millis()])
         };
         self.fonte_original = Some((fonte, texto));
     }
@@ -1483,9 +1901,12 @@ impl App {
         let move_cursor = matches!(acao, Action::Click(_) | Action::Move(_) | Action::Select(_)
             | Action::Drag(_) | Action::SelectWord | Action::SelectLine);
         let editar = acao.is_edit();
-        if !matches!(acao, Action::Scroll { .. }) {
-            self.foco_documento = false;
+        if let Action::Scroll { lines } = acao {
+            // Todas as linhas cabem no editor: a roda move a barra de rolagem de fora.
+            let passo = scrollable::AbsoluteOffset { x: 0., y: lines as f32 * painel_codigo::ALTURA_DA_LINHA };
+            return scrollable::scroll_by(scrollable::Id::new("codigo"), passo);
         }
+        self.foco_documento = false;
         painel.conteudo.perform(acao);
         if editar {
             painel.ultima_edicao = Some(Instant::now());
@@ -1541,19 +1962,57 @@ impl App {
                     Ok("inserir") => Aba::Inserir,
                     Ok("layout") => Aba::Layout,
                     Ok("revisao") => Aba::Revisao,
+                    Ok("desenhar") => Aba::Desenhar,
+                    Ok("design") => Aba::Design,
+                    Ok("referencias") => Aba::Referencias,
+                    Ok("correspondencias") => Aba::Correspondencias,
                     _ => Aba::Exibir,
                 };
                 self.painel_revisao |= self.aba == Aba::Revisao;
+                // `FEATHERDOCS_CAPTURAR_PENDENTE=1`: a pergunta de salvar antes de um documento novo.
+                if std::env::var_os("FEATHERDOCS_CAPTURAR_PENDENTE").is_some() {
+                    self.pendente = Some(Destino::Novo);
+                }
+                // `FEATHERDOCS_CAPTURAR_BUSCA=texto`: o painel de busca aberto, com Substituir.
+                if let Ok(t) = std::env::var("FEATHERDOCS_CAPTURAR_BUSCA") {
+                    self.busca = true;
+                    self.substituir_visivel = true;
+                    self.busca_opcoes.palavra = true;
+                    let _ = self.update(Msg::Consulta(t));
+                }
+                // `FEATHERDOCS_CAPTURAR_ESTILOS=x`: a galeria de estilos aberta, como se o botão estivesse em x.
+                if let Some(x) = std::env::var("FEATHERDOCS_CAPTURAR_ESTILOS").ok().and_then(|x| x.parse().ok()) {
+                    self.ponto_menu_faixa = iced::Point::new(x, 0.);
+                    self.menu_faixa = Some(faixa::MenuFaixa::Estilos);
+                }
+                // `FEATHERDOCS_CAPTURAR_EXPORTAR_PDF=1`: a janela Exportar PDF.
+                if std::env::var_os("FEATHERDOCS_CAPTURAR_EXPORTAR_PDF").is_some() {
+                    let _ = self.comando(Comando::ExportarPdf);
+                }
+                // `FEATHERDOCS_CAPTURAR_LINHA=26`: a aba Avisos e o código LaTeX naquela linha.
+                if let Some(n) = std::env::var("FEATHERDOCS_CAPTURAR_LINHA").ok().and_then(|n| n.parse().ok()) {
+                    self.lateral = 2;
+                    let _ = self.update(Msg::IrLinhaCodigo(n));
+                }
+                // `FEATHERDOCS_CAPTURAR_ARQUIVO=Referencias.bib`: abre um arquivo do projeto LaTeX.
+                if let Ok(nome) = std::env::var("FEATHERDOCS_CAPTURAR_ARQUIVO") {
+                    self.lateral = 1;
+                    let _ = self.update(Msg::AbrirArquivo(nome));
+                }
                 self.atualizar();
                 // `FEATHERDOCS_CAPTURAR_PDF=saida.pdf`: grava também o PDF das páginas.
                 if let Some(saida) = std::env::var_os("FEATHERDOCS_CAPTURAR_PDF") {
-                    match crate::pdf::gerar(&self.quadros) {
+                    let meta = &self.sessao.documento().meta;
+                    let opcoes = crate::pdf::OpcoesPdf::do_documento(&meta.titulo, &meta.autor);
+                    match crate::pdf::gerar_com(&self.quadros_impressos(), &opcoes, &self.sessao.links_do_pdf(), &self.sessao.marcadores_do_pdf()) {
                         Ok(b) => { let _ = std::fs::write(&saida, b); }
                         Err(e) => eprintln!("PDF não gerado: {e}"),
                     }
                 }
                 self.passo_captura = 1;
-                self.rolar_ao_cursor()
+                // Maximizada, a faixa aparece inteira na foto (a janela nasce com 1200 px).
+                let maximizar = window::get_latest().and_then(|id| window::maximize(id, true));
+                Task::batch([maximizar, self.rolar_ao_cursor()])
             }
             1 => {
                 self.passo_captura = 2;
@@ -1579,6 +2038,73 @@ impl App {
         }
     }
 
+    /// Um arquivo do projeto LaTeX, só para ver: a imagem inteira ou o texto com os números de linha.
+    fn view_arquivo<'a>(&'a self, nome: &'a str, visto: &'a Visto) -> Element<'a, Msg> {
+        let zoom: Element<'a, Msg> = if matches!(visto, Visto::Imagem(..)) {
+            let botao = |ic: &'static str, m: Msg| button(icone(ic, 14.)).padding(4).style(estilo_botao_pequeno(false)).on_press(m);
+            row![
+                botao("zoom-out", Msg::ZoomArquivo(1. / 1.25)),
+                button(text(format!("{:.0}%", self.zoom_arquivo * 100.)).size(11)).padding([3, 6]).style(estilo_botao_pequeno(false)).on_press(Msg::ZoomArquivo(0.)),
+                botao("zoom-in", Msg::ZoomArquivo(1.25)),
+            ]
+            .spacing(2)
+            .align_y(Alignment::Center)
+            .into()
+        } else {
+            text(tr("Somente leitura")).size(11).color(COR_TEXTO_MUTED()).into()
+        };
+        let topo = container(
+            row![
+                icone(if matches!(visto, Visto::Imagem(..)) { "photo" } else { "file-code" }, 16.),
+                text(nome).size(13),
+                Space::with_width(Length::Fill),
+                zoom,
+                button(icone("x", 14.)).padding(4).style(estilo_botao_pequeno(false)).on_press(Msg::FecharArquivo),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
+        )
+        .padding([6, 10])
+        .width(Length::Fill)
+        .style(estilo_container_topo);
+        let corpo: Element<'a, Msg> = match visto {
+            // 100% = a imagem inteira cabendo no painel (o `responsive` dá o espaço); maior, rola nas barras.
+            Visto::Imagem(h, w, a) => {
+                let (h, w, a, z) = (h.clone(), *w as f32, *a as f32, self.zoom_arquivo);
+                iced::widget::responsive(move |espaco| {
+                    let ajuste = ((espaco.width - 24.) / w).min((espaco.height - 24.) / a).max(0.01);
+                    let imagem = iced::widget::image(h.clone()).width(w * ajuste * z).height(a * ajuste * z);
+                    scrollable(container(imagem).padding(12).center_x(Length::Shrink))
+                        .direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::default(), horizontal: scrollable::Scrollbar::default() })
+                        .width(Length::Fill)
+                        .height(Length::Fill)
+                        .into()
+                })
+                .into()
+            }
+            Visto::Texto(t) => {
+                let numeros = (1..=t.lines().count().max(1)).map(|i| i.to_string()).collect::<Vec<_>>().join("\n");
+                let mono = |s: String| text(s).font(painel_codigo::FONTE_MONO).size(painel_codigo::TAMANHO);
+                scrollable(
+                    row![
+                        container(mono(numeros).color(COR_TEXTO_MUTED()).align_x(iced::alignment::Horizontal::Right))
+                            .padding(iced::Padding { top: painel_codigo::PADDING, bottom: painel_codigo::PADDING, left: 8., right: 6. }),
+                        container(mono(t.clone()).color(COR_TEXTO())).padding(painel_codigo::PADDING),
+                    ],
+                )
+                .direction(scrollable::Direction::Both { vertical: scrollable::Scrollbar::default(), horizontal: scrollable::Scrollbar::default() })
+                .height(Length::Fill)
+                .into()
+            }
+            Visto::Aviso(a) => container(text(a.as_str()).size(13).color(COR_TEXTO_MUTED())).padding(20).into(),
+        };
+        container(column![topo, corpo])
+            .width(Length::FillPortion(45))
+            .height(Length::Fill)
+            .style(|_t| container::Style { background: Some(COR_PAINEL().into()), ..Default::default() })
+            .into()
+    }
+
     fn view_codigo<'a>(&'a self, painel: &'a PainelCodigo) -> Element<'a, Msg> {
         use iced::widget::text_editor;
         let (linha, coluna) = painel.conteudo.cursor_position();
@@ -1591,7 +2117,7 @@ impl App {
                 icone("code", 16.),
                 text(titulo).size(13),
                 Space::with_width(Length::Fill),
-                text(format!("Lin {}, Col {}", linha + 1, coluna + 1))
+                text(trf("Lin {}, Col {}", &[&(linha + 1), &(coluna + 1)]))
                     .size(11)
                     .color(COR_TEXTO_MUTED()),
                 button(text(rotulo_outra).size(12))
@@ -1612,9 +2138,9 @@ impl App {
         let editor = text_editor(&painel.conteudo)
             .on_action(Msg::CodigoEditar)
             .font(painel_codigo::FONTE_MONO)
-            .size(13.5)
-            .padding(10)
-            .height(Length::Fill)
+            .size(painel_codigo::TAMANHO)
+            .padding(painel_codigo::PADDING)
+            .height(Length::Shrink)
             .wrapping(iced::widget::text::Wrapping::None)
             .key_binding(|tecla| {
                 use iced::keyboard::Key;
@@ -1649,7 +2175,33 @@ impl App {
                 selection: COR_HOVER_AZUL(),
             })
             .highlight_with::<painel_codigo::Realce>(painel.fonte, painel_codigo::formato);
-        container(column![topo, editor])
+        let mut corpo = row![];
+        let f = usize::from(painel.fonte == Fonte::Markdown);
+        // O realce lê o tema de uma variável global: vale o do painel aberto (só há um).
+        painel_codigo::definir_tema(self.config.tema_codigo[f]);
+        if self.config.numeros_de_linha[f] {
+            let n = painel.conteudo.line_count();
+            // A linha com algo que não foi convertido sai na cor de erro (a lista está em Avisos).
+            let marcadas: std::collections::HashSet<usize> =
+                if painel.fonte == Fonte::Latex { self.avisos_latex.iter().flat_map(|a| a.linhas.iter().copied()).collect() } else { Default::default() };
+            let numeros: Vec<iced::widget::text::Span<'_, Msg, iced::Font>> = (1..=n)
+                .map(|i| {
+                    let s = iced::widget::span(if i < n { format!("{i}\n") } else { i.to_string() });
+                    if marcadas.contains(&i) { s.color(COR_ERRO()).font(iced::Font { weight: iced::font::Weight::Bold, ..painel_codigo::FONTE_MONO }) } else { s.color(COR_TEXTO_MUTED()) }
+                })
+                .collect();
+            corpo = corpo.push(
+                // Largura fixa pelos dígitos (o `rich_text` alinhado à direita ocupa o espaço todo).
+                container(iced::widget::rich_text(numeros).font(painel_codigo::FONTE_MONO).size(painel_codigo::TAMANHO).align_x(iced::alignment::Horizontal::Right)
+                    .width(n.to_string().len() as f32 * painel_codigo::TAMANHO * 0.62 + 2.))
+                    .padding(iced::Padding { top: painel_codigo::PADDING, bottom: painel_codigo::PADDING, left: 8., right: 6. }),
+            );
+        }
+        let corpo = scrollable(corpo.push(editor))
+            .id(scrollable::Id::new("codigo"))
+            .on_scroll(|v| Msg::CodigoRolou(v.absolute_offset().y, v.bounds().height))
+            .height(Length::Fill);
+        container(column![topo, corpo])
             .width(Length::FillPortion(45))
             .height(Length::Fill)
             .style(|_t| container::Style {
@@ -1694,6 +2246,11 @@ impl App {
             } else {
                 Subscription::none()
             },
+            if self.janelas.aberta(JanelaAux::Monitor) {
+                iced::time::every(std::time::Duration::from_secs(1)).map(|_| Msg::MonitorPulso)
+            } else {
+                Subscription::none()
+            },
             if self.passo_captura < 2 && std::env::var_os("FEATHERDOCS_CAPTURAR").is_some() {
                 iced::time::every(std::time::Duration::from_millis(1500)).map(|_| Msg::CapturarTela)
             } else {
@@ -1725,21 +2282,21 @@ impl App {
     fn view_editor(&self, janela: window::Id) -> Element<'_, Msg> {
         let titulo_documento = self.caminho.as_ref()
             .and_then(|p| p.file_name()).and_then(|n| n.to_str())
-            .unwrap_or("Documento sem título");
+            .unwrap_or(tr("Documento sem título"));
         let topo = feather_ui::cromo::barra_editor(
             titulo_documento,
             self.sessao.estado().sujo,
             Some(Msg::Comando(Comando::Menu)),
             [
-                feather_ui::cromo::Acao { icone: "file-plus", dica: "Novo (Ctrl+N)", mensagem: Some(Msg::Comando(Comando::Novo)) },
-                feather_ui::cromo::Acao { icone: "folder-open", dica: "Abrir (Ctrl+O)", mensagem: Some(Msg::Comando(Comando::Abrir)) },
-                feather_ui::cromo::Acao { icone: "device-floppy", dica: "Salvar (Ctrl+S)", mensagem: Some(Msg::Comando(Comando::Salvar)) },
-                feather_ui::cromo::Acao { icone: "file-export", dica: "Exportar", mensagem: Some(Msg::Comando(Comando::Exportar)) },
-                feather_ui::cromo::Acao { icone: "arrow-back-up", dica: "Desfazer (Ctrl+Z)", mensagem: Some(Msg::Comando(Comando::Desfazer)) },
-                feather_ui::cromo::Acao { icone: "arrow-forward-up", dica: "Refazer", mensagem: Some(Msg::Comando(Comando::Refazer)) },
-                feather_ui::cromo::Acao { icone: "search", dica: "Pesquisar (Ctrl+F)", mensagem: Some(Msg::Comando(Comando::Buscar)) },
-                feather_ui::cromo::Acao { icone: "help", dica: "Ajuda (F1)", mensagem: Some(Msg::Comando(Comando::Ajuda)) },
-                feather_ui::cromo::Acao { icone: "device-desktop", dica: "Monitor (F12)", mensagem: Some(Msg::Comando(Comando::Monitor)) },
+                feather_ui::cromo::Acao { icone: "file-plus", dica: tr("Novo (Ctrl+N)"), mensagem: Some(Msg::Comando(Comando::Novo)) },
+                feather_ui::cromo::Acao { icone: "folder-open", dica: tr("Abrir (Ctrl+O)"), mensagem: Some(Msg::Comando(Comando::Abrir)) },
+                feather_ui::cromo::Acao { icone: "device-floppy", dica: tr("Salvar (Ctrl+S)"), mensagem: Some(Msg::Comando(Comando::Salvar)) },
+                feather_ui::cromo::Acao { icone: "file-export", dica: tr("Exportar"), mensagem: Some(Msg::Comando(Comando::Exportar)) },
+                feather_ui::cromo::Acao { icone: "arrow-back-up", dica: tr("Desfazer (Ctrl+Z)"), mensagem: Some(Msg::Comando(Comando::Desfazer)) },
+                feather_ui::cromo::Acao { icone: "arrow-forward-up", dica: tr("Refazer"), mensagem: Some(Msg::Comando(Comando::Refazer)) },
+                feather_ui::cromo::Acao { icone: "search", dica: tr("Pesquisar (Ctrl+F)"), mensagem: Some(Msg::Comando(Comando::Buscar)) },
+                feather_ui::cromo::Acao { icone: "help", dica: tr("Ajuda (F1)"), mensagem: Some(Msg::Comando(Comando::Ajuda)) },
+                feather_ui::cromo::Acao { icone: "device-desktop", dica: tr("Monitor (F12)"), mensagem: Some(Msg::Comando(Comando::Monitor)) },
             ],
             Msg::Comando(Comando::Configuracoes),
         );
@@ -1759,6 +2316,7 @@ impl App {
                         && !self.ocupado
                         && self.pendente.is_none(),
                     imagens: &self.imagens,
+                    arrastando: self.arrastando,
                 })
                 .width(q.largura * self.config.zoom)
                 .height(q.altura * self.config.zoom),
@@ -1780,12 +2338,68 @@ impl App {
             Msg::Rolou(iced::Vector::new(o.x, o.y))
         })
         .height(Length::Fill)
-        .width(if self.codigo.is_some() { Length::FillPortion(55) } else { Length::Fill });
+        .width(if self.codigo.is_some() || self.arquivo_visto.is_some() { Length::FillPortion(55) } else { Length::Fill });
         let mut centro = row![].height(Length::Fill);
         if self.config.estrutura {
-            let mut titulos = column![text(tr("estrutura")).size(16)].spacing(7);
-            let estrutura = self.sessao.estrutura();
-            if estrutura.is_empty() {
+            let mut titulos = column![].spacing(7);
+            // Num projeto LaTeX o topo escolhe a lista: 0 estrutura, 1 arquivos, 2 o que não foi convertido.
+            let lateral = if self.arquivos_projeto.is_empty() { 0 } else { self.lateral };
+            if !self.arquivos_projeto.is_empty() {
+                let aba = |rotulo: String, v: u8| {
+                    button(text(rotulo).size(11.5)).padding([5, 4]).width(Length::Fill)
+                        .style(estilo_botao_pequeno(lateral == v)).on_press(Msg::Lateral(v))
+                };
+                titulos = titulos.push(row![
+                    aba(tr("estrutura").into(), 0),
+                    aba(tr("Arquivos").into(), 1),
+                    aba(trf("Avisos ({})", &[&self.avisos_latex.len()]), 2),
+                ].spacing(3));
+            }
+            let arquivos = lateral == 1;
+            // Como a árvore do Overleaf: o .tex abre o código; o resto abre para ver (só leitura).
+            if arquivos {
+                for nome in &self.arquivos_projeto {
+                    let tex = nome.to_ascii_lowercase().ends_with(".tex");
+                    let imagem = ["png", "jpg", "jpeg", "gif", "svg", "eps", "pdf"].iter().any(|x| nome.to_ascii_lowercase().ends_with(&format!(".{x}")));
+                    let linha = row![icone(if imagem { "photo" } else { "file-code" }, 14.), text(nome.as_str()).size(12)].spacing(6).align_y(Alignment::Center);
+                    let ativo = match &self.arquivo_visto {
+                        Some((visto, _)) => visto == nome,
+                        None => tex && self.fonte_do_codigo() == Some(Fonte::Latex),
+                    };
+                    titulos = titulos.push(button(linha).padding([5, 10]).width(Length::Fill).style(estilo_botao_pequeno(ativo)).on_press(Msg::AbrirArquivo(nome.clone())));
+                }
+            }
+            // O que o leitor não converteu; o clique leva à linha no código LaTeX.
+            if lateral == 2 {
+                if self.avisos_latex.is_empty() {
+                    titulos = titulos.push(text(tr("Tudo do código LaTeX foi convertido.")).size(12).color(COR_TEXTO_MUTED()));
+                }
+                for a in &self.avisos_latex {
+                    let mut detalhe = tr(a.tipo.rotulo()).to_string();
+                    if a.linha > 0 {
+                        detalhe = trf("{} · linha {}", &[&detalhe, &a.linha]);
+                    }
+                    if a.vezes > 1 {
+                        detalhe = trf("{} · {} vezes", &[&detalhe, &a.vezes]);
+                    }
+                    let item = row![
+                        icone("alert-triangle", 14.),
+                        column![text(a.nome.as_str()).font(painel_codigo::FONTE_MONO).size(12), text(detalhe).size(11).color(COR_TEXTO_MUTED())].spacing(2),
+                    ]
+                    .spacing(6)
+                    .align_y(Alignment::Center);
+                    let mut b = button(item).padding([5, 8]).width(Length::Fill).style(estilo_botao_pequeno(false));
+                    if a.linha > 0 {
+                        b = b.on_press(Msg::IrLinhaCodigo(a.linha));
+                    }
+                    titulos = titulos.push(b);
+                }
+            }
+            let estrutura = if lateral != 0 { Vec::new() } else { self.sessao.estrutura() };
+            if self.arquivos_projeto.is_empty() {
+                titulos = titulos.push(text(tr("estrutura")).size(16));
+            }
+            if estrutura.is_empty() && lateral == 0 {
                 titulos = titulos.push(text(tr("sem_titulos")).size(12).color(COR_TEXTO_MUTED()));
             }
             for t in estrutura {
@@ -1805,7 +2419,9 @@ impl App {
                     .style(estilo_painel_miniaturas),
             );
         }
-        if let Some(painel) = &self.codigo {
+        if let Some((nome, visto)) = &self.arquivo_visto {
+            centro = centro.push(self.view_arquivo(nome, visto));
+        } else if let Some(painel) = &self.codigo {
             centro = centro.push(self.view_codigo(painel));
         }
         centro = centro.push(paginas);
@@ -1838,9 +2454,12 @@ impl App {
         )
         .padding([7, 12])
         .style(estilo_container_topo);
-        let mut tela = column![topo].spacing(0);
+        let mut tela = column![].spacing(0);
         if !self.config.faixa_recolhida {
-            tela = tela.push(container(faixa::view(self)).style(estilo_painel_faixa));
+            tela = tela.push(
+                iced::widget::mouse_area(container(faixa::view(self)).style(estilo_painel_faixa))
+                    .on_move(Msg::PonteiroFaixa),
+            );
         }
         if let Some(alvo) = self.cor_ui.alvo {
             let titulo = match alvo {
@@ -1879,45 +2498,251 @@ impl App {
         if self.busca {
             tela = tela.push(self.view_busca());
         }
-        if self.pendente.is_some() {
-            tela = tela.push(
-                container(
-                    column![
-                        text(tr("salvar_pendente")).size(19),
-                        text(&self.status).size(12),
-                        row![
-                            button(text(tr("salvar")))
-                                .on_press(Msg::SalvarEContinuar)
-                                .style(estilo_botao_primario),
-                            button(text(tr("descartar")))
-                                .on_press(Msg::Descartar)
-                                .style(estilo_botao_secundario),
-                            button(text(tr("cancelar")))
-                                .on_press(Msg::Cancelar)
-                                .style(estilo_botao_secundario)
-                        ]
-                        .spacing(10)
-                    ]
-                    .spacing(15),
-                )
-                .padding(30)
-                .width(Length::Fill)
-                .height(Length::Fill),
-            );
+        if let Some((p, perdas)) = &self.perdas_exportar {
+            tela = tela.push(self.view_perdas(p.as_deref(), perdas));
         } else if self.menu_aberto {
             tela = tela.push(row![self.view_menu(), centro].height(Length::Fill));
         } else {
             tela = tela.push(centro);
         }
-        let tela: Element<'_, Msg> = tela.push(rodape).height(Length::Fill).into();
+        let corpo: Element<'_, Msg> = tela.push(rodape).height(Length::Fill).into();
+        let corpo = match self.menu_faixa {
+            Some(m) if !self.config.faixa_recolhida => self.view_menu_faixa(corpo, m),
+            _ => corpo,
+        };
+        let tela: Element<'_, Msg> = column![topo, corpo].spacing(0).into();
         let tela = match self.menu_contexto {
             Some(ponto) => self.view_contexto(tela, ponto),
             None => tela,
         };
-        match &self.formulario {
+        let tela = match &self.formulario {
             Some(f) => f.view(&self.sessao, tela),
             None => tela,
+        };
+        let tela = match &self.opcoes_pdf {
+            Some(o) => self.view_exportar_pdf(o, tela),
+            None => tela,
+        };
+        match &self.pendente {
+            Some(destino) => self.view_salvar_pendente(destino, tela),
+            None => tela,
         }
+    }
+
+    /// Exportar PDF com as opções da janela: escolhe o arquivo, grava e (se pedido) abre no leitor do sistema.
+    fn exportar_pdf(&mut self, opcoes: crate::pdf::OpcoesPdf) -> Task<Msg> {
+        if let Err(e) = crate::pdf::paginas_do_intervalo(&opcoes.paginas, self.quadros.len()) {
+            self.status = e;
+            self.opcoes_pdf = Some(opcoes);
+            return Task::none();
+        }
+        if self.ocupado {
+            return Task::none();
+        }
+        self.ocupado = true;
+        let quadros = self.quadros_impressos();
+        let (links, marcadores) = (self.sessao.links_do_pdf(), self.sessao.marcadores_do_pdf());
+        let nome = self.caminho.as_ref().and_then(|c| c.file_stem()).map_or_else(|| "documento".to_string(), |n| n.to_string_lossy().into_owned());
+        let versao = self.sessao.versao();
+        Task::perform(
+            async move {
+                let Some(f) = dialogo_de_arquivo().set_file_name(format!("{nome}.pdf")).add_filter("PDF", &["pdf"]).save_file().await else {
+                    return Ok(None);
+                };
+                let mut p = f.path().to_path_buf();
+                if p.extension().is_none() {
+                    p.set_extension("pdf");
+                }
+                tokio::task::spawn_blocking(move || {
+                    let b = crate::pdf::gerar_com(&quadros, &opcoes, &links, &marcadores)?;
+                    arquivos::gravar(&p, &b)?;
+                    if opcoes.abrir_depois {
+                        let _ = abrir_no_sistema(p.as_os_str());
+                    }
+                    Ok::<_, String>(Some((p, versao, true)))
+                })
+                .await
+                .map_err(|e| trf("Falha ao salvar documento: {}", &[&e]))?
+            },
+            Msg::Gravado,
+        )
+    }
+
+    /// Exportar PDF por cima do documento: páginas, marca d'água, dados do documento e o que o
+    /// PDF leva (links, marcadores, fontes da tela), tudo já preenchido com o comum.
+    fn view_exportar_pdf<'a>(&'a self, o: &'a crate::pdf::OpcoesPdf, base: Element<'a, Msg>) -> Element<'a, Msg> {
+        use crate::pdf::OpcoesPdf;
+        use feather_ui::dialogo::{self as dlg, Dialogo};
+        let muda = |f: &dyn Fn(&mut OpcoesPdf)| {
+            let mut n = o.clone();
+            f(&mut n);
+            Msg::OpcoesPdf(n)
+        };
+        let campo = |dica: String, valor: &str, f: fn(&mut OpcoesPdf, String)| {
+            let atual = o.clone();
+            text_input(&dica, valor)
+                .on_input(move |v| {
+                    let mut n = atual.clone();
+                    f(&mut n, v);
+                    Msg::OpcoesPdf(n)
+                })
+                .on_submit(Msg::ConfirmarPdf)
+                .padding([7, 10])
+                .size(13)
+                .style(|_, status| {
+                    let foco = matches!(status, text_input::Status::Focused { .. });
+                    text_input::Style {
+                        background: COR_PAINEL_FAIXA().into(),
+                        border: iced::Border { color: if foco { COR_AZUL_ACENTO() } else { COR_BORDA_SUAVE() }, width: 1., radius: 6.into() },
+                        icon: COR_TEXTO_MUTED(),
+                        placeholder: COR_TEXTO_MUTED(),
+                        value: COR_TEXTO(),
+                        selection: COR_HOVER_AZUL(),
+                    }
+                })
+        };
+        // Escolha de uma entre várias: etiqueta que acende, como as opções da busca.
+        let etiqueta = |rotulo: String, ligada: bool, msg: Msg| {
+            button(text(rotulo).size(12.5))
+                .padding([5, 14])
+                .on_press(msg)
+                .style(move |_, status| button::Style {
+                    background: Some(if ligada { COR_AZUL_FUNDO() } else if status == button::Status::Hovered { COR_HOVER() } else { iced::Color::TRANSPARENT }.into()),
+                    text_color: if ligada { COR_AZUL_ACENTO() } else { COR_TEXTO() },
+                    border: iced::Border { color: if ligada { COR_AZUL_ACENTO() } else { COR_BORDA() }, width: 1., radius: 14.into() },
+                    ..Default::default()
+                })
+        };
+        let opcao = |icone_: &'static str, titulo: &str, dica: &str, liga: bool, f: fn(&mut OpcoesPdf, bool)| {
+            let atual = o.clone();
+            row![
+                container(icone(icone_, 17.)).padding(8).style(|_| container::Style {
+                    background: Some(COR_AZUL_FUNDO().into()),
+                    border: iced::Border { radius: 9.into(), ..Default::default() },
+                    ..Default::default()
+                }),
+                feather_ui::configuracoes::linha(
+                    tr(titulo),
+                    tr(dica),
+                    toggler(liga).size(18.).on_toggle(move |v| {
+                        let mut n = atual.clone();
+                        f(&mut n, v);
+                        Msg::OpcoesPdf(n)
+                    }),
+                ),
+            ]
+            .spacing(12)
+            .align_y(Alignment::Center)
+        };
+        let total = self.quadros.len();
+        let atual = (self.pagina_ativa + 1).to_string();
+        let (resumo, valido) = match crate::pdf::paginas_do_intervalo(&o.paginas, total) {
+            Ok(p) => (trf("{} de {} páginas", &[&p.len().to_string(), &total.to_string()]), true),
+            Err(e) => (e, false),
+        };
+        let mut paginas = column![row![
+            etiqueta(tr("Todas").into(), o.escolha_paginas == 0, muda(&|n| {
+                n.escolha_paginas = 0;
+                n.paginas.clear();
+            })),
+            etiqueta(trf("Página atual ({})", &[&atual]), o.escolha_paginas == 1, muda(&|n| {
+                n.escolha_paginas = 1;
+                n.paginas = atual.clone();
+            })),
+            etiqueta(tr("Intervalo").into(), o.escolha_paginas == 2, muda(&|n| {
+                n.escolha_paginas = 2;
+                if n.paginas.is_empty() {
+                    n.paginas = format!("1-{total}");
+                }
+            })),
+            Space::with_width(Length::Fill),
+            text(resumo).size(12).color(if valido { COR_TEXTO_MUTED() } else { COR_ERRO() }),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center)]
+        .spacing(8);
+        if o.escolha_paginas == 2 {
+            paginas = paginas.push(campo(tr("ex.: 1-3, 5, 8").into(), &o.paginas, |n, v| n.paginas = v));
+        }
+        let predefinidas = [tr("RASCUNHO").to_string(), tr("CONFIDENCIAL").to_string()];
+        let mut marcas = row![etiqueta(tr("Nenhuma").into(), o.marca.is_empty() && !o.marca_propria, muda(&|n| {
+            n.marca.clear();
+            n.marca_propria = false;
+        }))]
+        .spacing(8)
+        .align_y(Alignment::Center);
+        for m in &predefinidas {
+            let m = m.clone();
+            marcas = marcas.push(etiqueta(m.clone(), !o.marca_propria && o.marca == m, muda(&|n| {
+                n.marca = m.clone();
+                n.marca_propria = false;
+            })));
+        }
+        marcas = marcas.push(etiqueta(tr("Outro texto").into(), o.marca_propria, muda(&|n| {
+            n.marca_propria = true;
+            n.marca.clear();
+        })));
+        let mut marca_dagua = column![marcas].spacing(8);
+        if o.marca_propria {
+            marca_dagua = marca_dagua.push(campo(tr("Texto na diagonal de cada página").into(), &o.marca, |n, v| n.marca = v));
+        }
+        let rotulado = |r: &str, c: iced::widget::TextInput<'a, Msg>| column![text(tr(r).to_string()).size(11.5).color(COR_TEXTO_MUTED()), c].spacing(4).width(Length::Fill);
+        let dados = column![
+            rotulado("Título", campo(String::new(), &o.titulo, |n, v| n.titulo = v)),
+            row![
+                rotulado("Autor", campo(String::new(), &o.autor, |n, v| n.autor = v)),
+                rotulado("Assunto", campo(String::new(), &o.assunto, |n, v| n.assunto = v)),
+            ]
+            .spacing(12),
+            rotulado("Palavras-chave", campo(tr("separadas por vírgula").into(), &o.palavras_chave, |n, v| n.palavras_chave = v)),
+        ]
+        .spacing(10);
+        let leva = column![
+            opcao("link", "Links clicáveis", "Sumário, referências e endereços levam ao destino.", o.links, |n, v| n.links = v),
+            opcao("sitemap", "Marcadores", "Os títulos na lateral do leitor de PDF.", o.marcadores, |n, v| n.marcadores = v),
+            opcao("text-size", "Fontes da tela", "Embutidas no arquivo: o PDF fica igual ao que você vê.", o.fontes_da_tela, |n, v| n.fontes_da_tela = v),
+            opcao("eye", "Abrir depois de exportar", "No leitor de PDF do sistema.", o.abrir_depois, |n, v| n.abrir_depois = v),
+        ];
+        let corpo = column![
+            column![dlg::secao(&tr("Páginas")), paginas].spacing(8),
+            column![dlg::secao(&tr("Marca d'água")), marca_dagua].spacing(8),
+            column![dlg::secao(&tr("Dados do documento")), dados].spacing(8),
+            column![dlg::secao(&tr("O PDF leva")), leva].spacing(0),
+        ]
+        .spacing(18);
+        let nome = self.caminho.as_ref().and_then(|c| c.file_name()).map_or_else(|| tr("Documento sem nome").to_string(), |n| n.to_string_lossy().into_owned());
+        Dialogo::new(tr("Exportar PDF"), corpo)
+            .icone("file-export")
+            .subtitulo(nome)
+            .ao_fechar(Msg::Cancelar)
+            .largura(520.0)
+            .altura_maxima(800.0)
+            .topo(70.0)
+            .secundario(tr("cancelar"), Some(Msg::Cancelar))
+            .primario(tr("Exportar"), valido.then_some(Msg::ConfirmarPdf))
+            .sobre(base)
+    }
+
+    /// "Salvar as alterações?" por cima do documento (que continua à vista), no diálogo da suíte:
+    /// o que se perde, e as três saídas; descartar fica à esquerda, longe do Salvar.
+    fn view_salvar_pendente<'a>(&'a self, destino: &Destino, base: Element<'a, Msg>) -> Element<'a, Msg> {
+        use feather_ui::dialogo::{self as dlg, Dialogo};
+        let nome = self.caminho.as_ref().and_then(|c| c.file_name()).map_or_else(|| tr("Documento sem nome").to_string(), |n| n.to_string_lossy().into_owned());
+        let frase = match destino {
+            Destino::Novo => tr("Antes de criar um documento novo, salve o que você mudou neste. Se descartar, as alterações se perdem."),
+            Destino::Abrir | Destino::AbrirCaminho(_) => tr("Antes de abrir outro arquivo, salve o que você mudou neste. Se descartar, as alterações se perdem."),
+            Destino::Fechar(_) => tr("Antes de fechar, salve o que você mudou neste documento. Se descartar, as alterações se perdem."),
+        };
+        Dialogo::new(tr("Salvar as alterações?"), text(frase).size(13).color(feather_ui::tema::COR_TEXTO()))
+            .icone("device-floppy")
+            .subtitulo(nome)
+            .ao_fechar(Msg::Cancelar)
+            .largura(460.0)
+            .topo(170.0)
+            .rodape_esquerda(dlg::botao_secundario(tr("descartar"), Some(Msg::Descartar)))
+            .secundario(tr("cancelar"), Some(Msg::Cancelar))
+            .primario(tr("salvar"), Some(Msg::SalvarEContinuar))
+            .sobre(base)
     }
     /// O diálogo de editar a nota desenhada em (x, y) da página, se houver uma ali.
     fn nota_em(&self, pagina: usize, x: f32, y: f32) -> Option<crate::dialogos::Tipo> {
@@ -1934,55 +2759,74 @@ impl App {
         }
         let externo = ["http://", "https://", "mailto:"].iter().any(|p| link.starts_with(p));
         if !externo {
-            self.status = format!("Link sem destino que eu saiba abrir: {link}");
+            self.status = trf("Link sem destino que eu saiba abrir: {}", &[&link]);
             return;
         }
-        #[cfg(target_os = "windows")]
-        let r = std::process::Command::new("explorer").arg(link).spawn();
-        #[cfg(target_os = "macos")]
-        let r = std::process::Command::new("open").arg(link).spawn();
-        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-        let r = std::process::Command::new("xdg-open").arg(link).spawn();
+        let r = abrir_no_sistema(link.as_ref());
         self.status = match r {
-            Ok(_) => format!("Abrindo {link}"),
-            Err(e) => format!("Não consegui abrir o link: {e}"),
+            Ok(_) => trf("Abrindo {}", &[&link]),
+            Err(e) => trf("Não consegui abrir o link: {}", &[&e]),
         };
+    }
+    /// Um menu que desce da faixa, logo abaixo dela, alinhado onde o botão foi clicado.
+    fn view_menu_faixa<'a>(&'a self, base: Element<'a, Msg>, menu: faixa::MenuFaixa) -> Element<'a, Msg> {
+        let conteudo = match menu {
+            faixa::MenuFaixa::Quebras => faixa::menu_quebras(),
+            faixa::MenuFaixa::Estilos => faixa::menu_estilos(self),
+            outro => faixa::menu_paragrafo(self, outro),
+        };
+        // As abas (≈ 31 px) mais a faixa (106 px): o menu começa na borda de baixo da faixa.
+        let topo = 138.;
+        // A galeria aberta cobre a fechada (como no Word): a borda direita fica no botão que a abriu.
+        let esquerda = match menu {
+            faixa::MenuFaixa::Estilos => (self.ponto_menu_faixa.x + 24. - faixa::LARGURA_GALERIA_ABERTA).max(4.),
+            _ => (self.ponto_menu_faixa.x - 24.).max(4.),
+        };
+        iced::widget::stack![
+            base,
+            iced::widget::mouse_area(Space::new(Length::Fill, Length::Fill))
+                .on_press(Msg::MenuFaixa(None))
+                .on_right_press(Msg::MenuFaixa(None)),
+            container(container(conteudo).padding(4).style(estilo_popup_menu))
+                .padding(iced::Padding { top: topo, left: esquerda, ..iced::Padding::ZERO }),
+        ]
+        .into()
     }
     fn view_contexto<'a>(&'a self, base: Element<'a, Msg>, ponto: iced::Point) -> Element<'a, Msg> {
         let item = |ic: &str, rotulo: &str, m: Msg| -> Element<'a, Msg> {
-            button(row![icone(ic, 15.), text(rotulo.to_string()).size(12)].spacing(8).align_y(Alignment::Center))
+            button(row![icone(ic, 15.), text(tr(rotulo).to_string()).size(12)].spacing(8).align_y(Alignment::Center))
                 .width(Length::Fill).padding([5, 10])
                 .style(estilo_botao_pequeno(false))
                 .on_press(Msg::DoMenu(Box::new(m)))
                 .into()
         };
         let mut col = column![
-            item("cut", "Recortar", Msg::Comando(Comando::Recortar)),
-            item("copy", "Copiar", Msg::Comando(Comando::Copiar)),
-            item("clipboard", "Colar", Msg::Comando(Comando::Colar)),
-            item("clipboard", "Colar sem formatação", Msg::Comando(Comando::ColarSemFormatacao)),
+            item("cut", tr("Recortar"), Msg::Comando(Comando::Recortar)),
+            item("copy", tr("Copiar"), Msg::Comando(Comando::Copiar)),
+            item("clipboard", tr("Colar"), Msg::Comando(Comando::Colar)),
+            item("clipboard", tr("Colar sem formatação"), Msg::Comando(Comando::ColarSemFormatacao)),
         ].spacing(1);
         if self.sessao.link_no_cursor().is_some() {
             col = col
-                .push(item("link-open", "Abrir link", Msg::AbrirLink))
-                .push(item("link", "Editar link", Msg::FormAbrir(crate::dialogos::Tipo::Link)))
-                .push(item("link-remove", "Remover link", Msg::FormRemoverLink));
+                .push(item("link-open", tr("Abrir link"), Msg::AbrirLink))
+                .push(item("link", tr("Editar link"), Msg::FormAbrir(crate::dialogos::Tipo::Link)))
+                .push(item("link-remove", tr("Remover link"), Msg::FormRemoverLink));
         } else {
-            col = col.push(item("link", "Link…", Msg::FormAbrir(crate::dialogos::Tipo::Link)));
+            col = col.push(item("link", tr("Link…"), Msg::FormAbrir(crate::dialogos::Tipo::Link)));
         }
         if let Some(tipo) = self.nota_contexto {
-            col = col.push(item("text-box", "Editar nota…", Msg::FormAbrir(tipo)));
+            col = col.push(item("text-box", tr("Editar nota…"), Msg::FormAbrir(tipo)));
         }
         col = col
-            .push(item("comentario", "Novo comentário…", Msg::FormAbrir(crate::dialogos::Tipo::Comentario)))
-            .push(item("clear", "Limpar formatação", Msg::Comando(Comando::LimparFormatacao)));
+            .push(item("comentario", tr("Novo comentário…"), Msg::FormAbrir(crate::dialogos::Tipo::Comentario)))
+            .push(item("clear", tr("Limpar formatação"), Msg::Comando(Comando::LimparFormatacao)));
         if self.visao.formato.tabela.is_some() {
             col = col
-                .push(item("plus", "Inserir linha", Msg::Comando(Comando::TabelaEstrutura("linha+"))))
-                .push(item("plus", "Inserir coluna", Msg::Comando(Comando::TabelaEstrutura("coluna+"))))
-                .push(item("minus", "Excluir linha", Msg::Comando(Comando::TabelaEstrutura("linha-"))))
-                .push(item("minus", "Excluir coluna", Msg::Comando(Comando::TabelaEstrutura("coluna-"))))
-                .push(item("trash", "Excluir tabela", Msg::Comando(Comando::TabelaExcluir)));
+                .push(item("plus", tr("Inserir linha"), Msg::Comando(Comando::TabelaEstrutura("linha+"))))
+                .push(item("plus", tr("Inserir coluna"), Msg::Comando(Comando::TabelaEstrutura("coluna+"))))
+                .push(item("minus", tr("Excluir linha"), Msg::Comando(Comando::TabelaEstrutura("linha-"))))
+                .push(item("minus", tr("Excluir coluna"), Msg::Comando(Comando::TabelaEstrutura("coluna-"))))
+                .push(item("trash", tr("Excluir tabela"), Msg::Comando(Comando::TabelaExcluir)));
         }
         let menu = container(col).width(220).padding(4).style(estilo_popup_menu);
         iced::widget::stack![
@@ -1998,26 +2842,26 @@ impl App {
         use feather_ui::dialogo as dlg;
         let c = self.sessao.contagem();
         let mut col = column![
-            row![text("Revisão").size(16), Space::with_width(Length::Fill),
+            row![text(tr("Revisão")).size(16), Space::with_width(Length::Fill),
                 feather_ui::componentes::botao_icone(icone("x", 14.), "Fechar painel", Some(Msg::Comando(Comando::PainelRevisao)), false)],
-            dlg::secao(if c.selecao { "Estatísticas da seleção" } else { "Estatísticas" }),
+            dlg::secao(tr(if c.selecao { "Estatísticas da seleção" } else { "Estatísticas" })),
             dlg::grade_rotulo_valor(vec![
-                ("Páginas".into(), c.paginas.to_string()),
-                ("Palavras".into(), c.palavras.to_string()),
-                ("Caracteres".into(), c.caracteres.to_string()),
-                ("Sem espaços".into(), c.caracteres_sem_espaco.to_string()),
-                ("Parágrafos".into(), c.paragrafos.to_string()),
-                ("Linhas".into(), c.linhas.to_string()),
+                (tr("Páginas").into(), c.paginas.to_string()),
+                (tr("Palavras").into(), c.palavras.to_string()),
+                (tr("Caracteres").into(), c.caracteres.to_string()),
+                (tr("Sem espaços").into(), c.caracteres_sem_espaco.to_string()),
+                (tr("Parágrafos").into(), c.paragrafos.to_string()),
+                (tr("Linhas").into(), c.linhas.to_string()),
             ], 2),
-            dlg::secao("Comentários"),
+            dlg::secao(tr("Comentários")),
         ].spacing(8);
         let comentarios = self.sessao.comentarios();
         if comentarios.is_empty() {
-            col = col.push(text("Nenhum comentário.").size(12).color(COR_TEXTO_MUTED()));
+            col = col.push(text(tr("Nenhum comentário.")).size(12).color(COR_TEXTO_MUTED()));
         }
         for k in comentarios {
             let mut cartao = column![
-                text(format!("{} · p. {}", if k.autor.is_empty() { "Comentário" } else { &k.autor }, k.pagina)).size(11).color(COR_TEXTO_MUTED()),
+                text(format!("{} · p. {}", if k.autor.is_empty() { tr("Comentário") } else { &k.autor }, k.pagina)).size(11).color(COR_TEXTO_MUTED()),
                 text(format!("“{}”", k.trecho)).size(11).color(COR_TEXTO_MUTED()),
                 text(k.texto.clone()).size(13),
             ].spacing(3);
@@ -2032,10 +2876,10 @@ impl App {
             ].spacing(2));
             col = col.push(container(cartao).padding(8).width(Length::Fill).style(dlg::estilo_bloco));
         }
-        col = col.push(dlg::secao("Alterações sugeridas"));
+        col = col.push(dlg::secao(tr("Alterações sugeridas")));
         let revisoes = self.sessao.revisoes();
         if revisoes.is_empty() {
-            col = col.push(text("Nenhuma alteração sugerida.").size(12).color(COR_TEXTO_MUTED()));
+            col = col.push(text(tr("Nenhuma alteração sugerida.")).size(12).color(COR_TEXTO_MUTED()));
         }
         for r in revisoes {
             let tipo = match r.tipo {
@@ -2058,12 +2902,30 @@ impl App {
             .style(estilo_painel_miniaturas)
             .into()
     }
+    /// Configurações → LaTeX (`f` = 0) ou Markdown (1): o painel de código de cada um.
+    fn view_config_codigo(&self, f: usize) -> Element<'_, Msg> {
+        let temas = painel_codigo::TEMAS.iter().enumerate().fold(column![].spacing(4), |itens, (i, nome)| {
+            // A amostra: um quadradinho de cada cor do tema, ao lado do nome.
+            let amostra = painel_codigo::cores_do_tema(i).iter().fold(row![].spacing(2), |r, c| {
+                let c = *c;
+                r.push(container(Space::new(10, 10)).style(move |_t| container::Style { background: Some(c.into()), ..Default::default() }))
+            });
+            itens.push(button(row![amostra, text(*nome).size(12.5)].spacing(8).align_y(Alignment::Center)).padding([6, 12]).width(220)
+                .style(estilo_botao_pequeno(self.config.tema_codigo[f] == i)).on_press(Msg::TemaCodigo(f, i)))
+        });
+        column![
+            feather_ui::configuracoes::linha(tr("Números de linha"), tr("À esquerda do painel de código."),
+                toggler(self.config.numeros_de_linha[f]).on_toggle(move |v| Msg::NumerosDeLinha(f, v))),
+            feather_ui::configuracoes::linha(tr("Tema do código"), tr("As cores do realce de sintaxe."), temas),
+        ].spacing(10).into()
+    }
+
     fn view_configuracoes(&self) -> Element<'_, Msg> {
-        let secoes = ["Aparência", "Exibição", "Documento", "Salvamento", "Atalhos", "Sobre"];
+        let secoes = ["Aparência", "Exibição", "Documento", "LaTeX", "Markdown", "Salvamento", "Atalhos", "Sobre"];
         let menu = feather_ui::configuracoes::menu(
-            "Configurações",
+            tr("Configurações"),
             secoes.iter().enumerate().map(|(i, nome)| (
-                (*nome).to_owned(),
+                tr(nome).to_owned(),
                 self.config_secao == i as u8,
                 Msg::ConfigSecao(i as u8),
             )),
@@ -2077,56 +2939,60 @@ impl App {
         });
         let corpo: Element<'_, Msg> = match self.config_secao {
             0 => column![
-                feather_ui::configuracoes::linha("Tema", "Automático usa a aparência do sistema na abertura.",
+                feather_ui::configuracoes::linha(tr("Tema"), tr("Automático usa a aparência do sistema na abertura."),
                     row![
-                        opcao("Automático", self.config.tema_auto, Msg::TemaAuto),
-                        opcao("Claro", !self.config.tema_auto && !self.config.escuro, Msg::Escuro(false)),
-                        opcao("Escuro", !self.config.tema_auto && self.config.escuro, Msg::Escuro(true))
+                        opcao(tr("Automático"), self.config.tema_auto, Msg::TemaAuto),
+                        opcao(tr("Claro"), !self.config.tema_auto && !self.config.escuro, Msg::Escuro(false)),
+                        opcao(tr("Escuro"), !self.config.tema_auto && self.config.escuro, Msg::Escuro(true))
                     ].spacing(4)),
-                feather_ui::configuracoes::linha("Cor de destaque", "Acento para botões, abas e seleção.", cores),
-                feather_ui::configuracoes::linha("Logotipo", "Azul de fábrica ou cor escolhida",
-                    opcao("Restaurar azul padrão", false, Msg::LogoPadrao)),
-                feather_ui::configuracoes::linha("Barra de título integrada",
-                    "Minimizar, maximizar e fechar na barra própria. Aplica-se na próxima abertura.",
+                feather_ui::configuracoes::linha(tr("Idioma"), tr("Idioma dos menus, da faixa e das janelas."),
+                    crate::localidade::IDIOMAS.iter().fold(row![].spacing(4), |itens, (codigo, nome)| {
+                        itens.push(opcao(nome, crate::localidade::atual() == *codigo, Msg::Idioma(codigo)))
+                    })),
+                feather_ui::configuracoes::linha(tr("Cor de destaque"), tr("Acento para botões, abas e seleção."), cores),
+                feather_ui::configuracoes::linha(tr("Logotipo"), tr("Azul de fábrica ou cor escolhida"),
+                    opcao(tr("Restaurar azul padrão"), false, Msg::LogoPadrao)),
+                feather_ui::configuracoes::linha(tr("Barra de título integrada"), tr("Minimizar, maximizar e fechar na barra própria. Aplica-se na próxima abertura."),
                     toggler(self.config.barra_propria).on_toggle(Msg::BarraPropria)),
             ].spacing(10).into(),
             1 => column![
-                feather_ui::configuracoes::linha("Faixa de opções", "Ctrl+F1 mostra ou recolhe a faixa.",
+                feather_ui::configuracoes::linha(tr("Faixa de opções"), tr("Ctrl+F1 mostra ou recolhe a faixa."),
                     toggler(!self.config.faixa_recolhida).on_toggle(|_| Msg::AlternarFaixa)),
-                feather_ui::configuracoes::linha("Estrutura", "Painel com os títulos do documento.",
+                feather_ui::configuracoes::linha(tr("Estrutura"), tr("Painel com os títulos do documento."),
                     toggler(self.config.estrutura).on_toggle(|_| Msg::Comando(Comando::Estrutura))),
-                feather_ui::configuracoes::linha("Marcas de formatação", "Mostrar os símbolos invisíveis de edição.",
+                feather_ui::configuracoes::linha(tr("Marcas de formatação"), tr("Mostrar os símbolos invisíveis de edição."),
                     toggler(self.sessao.estado().marcas).on_toggle(|_| Msg::Comando(Comando::Marcas))),
             ].spacing(10).into(),
             2 => column![
-                feather_ui::configuracoes::linha("Documento", "Papel e paginação calculados pelo motor Rust.",
-                    text(format!("{} · {} páginas", self.sessao.estado().papel, self.sessao.total_de_paginas())).size(12.5)),
-                feather_ui::configuracoes::linha("Estrutura", "Exibir títulos para navegação.",
+                feather_ui::configuracoes::linha(tr("Documento"), tr("Papel e paginação calculados pelo motor Rust."),
+                    text(trf("{} · {} páginas", &[&self.sessao.estado().papel, &self.sessao.total_de_paginas()])).size(12.5)),
+                feather_ui::configuracoes::linha(tr("Estrutura"), tr("Exibir títulos para navegação."),
                     toggler(self.config.estrutura).on_toggle(|_| Msg::Comando(Comando::Estrutura))),
             ].spacing(10).into(),
-            3 => column![
-                feather_ui::configuracoes::linha("Arquivo nativo", "O FeatherDocs salva localmente em .fdoz.",
-                    text(if self.sessao.estado().sujo { "Alterações pendentes" } else { "Salvo" }).size(12.5)),
-                feather_ui::configuracoes::linha("Salvar", "Também é possível exportar para Word, Markdown e LaTeX.",
-                    opcao("Salvar agora", false, Msg::Comando(Comando::Salvar))),
+            3 | 4 => self.view_config_codigo(usize::from(self.config_secao - 3)),
+            5 => column![
+                feather_ui::configuracoes::linha(tr("Arquivo nativo"), tr("O FeatherDocs salva localmente em .fdoz."),
+                    text(tr(if self.sessao.estado().sujo { "Alterações pendentes" } else { "Salvo" })).size(12.5)),
+                feather_ui::configuracoes::linha(tr("Salvar"), tr("Também é possível exportar para Word, Markdown e LaTeX."),
+                    opcao(tr("Salvar agora"), false, Msg::Comando(Comando::Salvar))),
             ].spacing(10).into(),
-            4 => column![
-                text("Atalhos de teclado").size(17),
-                text("Ctrl+N Novo · Ctrl+O Abrir · Ctrl+S Salvar · Ctrl+Shift+S Salvar como"),
-                text("Ctrl+F Buscar · Ctrl+Z Desfazer · F1 Ajuda · F12 Monitor · Ctrl+F1 Recolher faixa"),
-                text("A personalização das combinações ainda será integrada ao registro global da suíte.")
+            6 => column![
+                text(tr("Atalhos de teclado")).size(17),
+                text(tr("Ctrl+N Novo · Ctrl+O Abrir · Ctrl+S Salvar · Ctrl+Shift+S Salvar como")),
+                text(tr("Ctrl+F Buscar · Ctrl+Z Desfazer · F1 Ajuda · F12 Monitor · Ctrl+F1 Recolher faixa")),
+                text(tr("A personalização das combinações ainda será integrada ao registro global da suíte."))
                     .size(12).color(COR_TEXTO_MUTED()),
             ].spacing(12).into(),
             _ => column![
-                text("FeatherDocs").size(22),
-                text("Editor de documentos da suíte FeatherOffice, nativo em Rust/Iced."),
-                text("Arquivos e operações são locais. Não há conta, telemetria ou envio automático de conteúdo."),
-                text("Tema, botões, menus e configurações vêm da biblioteca feather-ui."),
+                text(tr("FeatherDocs")).size(22),
+                text(tr("Editor de documentos da suíte FeatherOffice, nativo em Rust/Iced.")),
+                text(tr("Arquivos e operações são locais. Não há conta, telemetria ou envio automático de conteúdo.")),
+                text(tr("Tema, botões, menus e configurações vêm da biblioteca feather-ui.")),
             ].spacing(12).into(),
         };
         feather_ui::configuracoes::tela(
             menu,
-            secoes[self.config_secao.min(5) as usize],
+            secoes[self.config_secao.min(7) as usize],
             corpo,
             None,
         )
@@ -2134,21 +3000,22 @@ impl App {
 
     fn view_menu(&self) -> Element<'_, Msg> {
         let menu = feather_ui::cromo::menu_arquivos("FeatherDocs", [
-            ("file-plus", "Novo documento", Msg::Comando(Comando::Novo)),
-            ("folder-open", "Abrir", Msg::Comando(Comando::Abrir)),
-            ("device-floppy", "Salvar", Msg::Comando(Comando::Salvar)),
-            ("device-floppy", "Salvar como", Msg::Comando(Comando::SalvarComo)),
-            ("file-export", "Exportar", Msg::Comando(Comando::Exportar)),
-            ("info-circle", "Propriedades", Msg::FormAbrir(crate::dialogos::Tipo::Propriedades)),
-            ("settings", "Configurações", Msg::Comando(Comando::Configuracoes)),
-            ("help", "Ajuda (F1)", Msg::Comando(Comando::Ajuda)),
-            ("device-desktop", "Monitor (F12)", Msg::Comando(Comando::Monitor)),
-            ("x", "Fechar menu", Msg::Cancelar),
+            ("file-plus", tr("Novo documento"), Msg::Comando(Comando::Novo)),
+            ("folder-open", tr("Abrir"), Msg::Comando(Comando::Abrir)),
+            ("device-floppy", tr("Salvar"), Msg::Comando(Comando::Salvar)),
+            ("device-floppy", tr("Salvar como"), Msg::Comando(Comando::SalvarComo)),
+            ("file-export", tr("Exportar"), Msg::Comando(Comando::Exportar)),
+            ("file-export", tr("Exportar PDF (Ctrl+P)"), Msg::Comando(Comando::ExportarPdf)),
+            ("info-circle", tr("Propriedades"), Msg::FormAbrir(crate::dialogos::Tipo::Propriedades)),
+            ("settings", tr("Configurações"), Msg::Comando(Comando::Configuracoes)),
+            ("help", tr("Ajuda (F1)"), Msg::Comando(Comando::Ajuda)),
+            ("device-desktop", tr("Monitor (F12)"), Msg::Comando(Comando::Monitor)),
+            ("x", tr("Fechar menu"), Msg::Cancelar),
         ]);
         if self.config.recentes.is_empty() {
             return menu;
         }
-        let mut recentes = column![text("Recentes").size(12).color(COR_TEXTO_MUTED())].spacing(4);
+        let mut recentes = column![text(tr("Recentes")).size(12).color(COR_TEXTO_MUTED())].spacing(4);
         for p in &self.config.recentes {
             let nome = p.file_name().and_then(|n| n.to_str()).unwrap_or("?").to_string();
             let pasta = p.parent().map(|d| d.display().to_string()).unwrap_or_default();
@@ -2168,71 +3035,119 @@ impl App {
 
     fn view_ajuda(&self) -> Element<'_, Msg> {
         feather_ui::cromo::painel_utilitario(
-            "Ajuda · FeatherDocs",
+            tr("Ajuda · FeatherDocs"),
             ajuda::modelo().view(&self.ajuda_estado).map(Msg::AjudaEvento),
             Msg::FecharAuxiliar(JanelaAux::Ajuda),
         )
     }
 
+    /// Monitor F12: a janela inteira (memória, CPU, console) é do `feather_ui::monitor`, a mesma do
+    /// FeatherSheet; aqui só entram as métricas do documento.
     fn view_monitor(&self) -> Element<'_, Msg> {
         let e = self.sessao.estado();
-        let memoria = std::fs::read_to_string("/proc/self/status").ok()
-            .and_then(|s| s.lines().find(|l| l.starts_with("VmRSS:"))
-                .and_then(|l| l.split_whitespace().nth(1))
-                .and_then(|n| n.parse::<f64>().ok()))
-            .map(|kb| format!("{:.1} MiB de RAM no processo", kb / 1024.0))
-            .unwrap_or_else(|| "Memória do processo: indisponível neste sistema".to_owned());
-        feather_ui::cromo::painel_utilitario(
-            "Monitor · FeatherDocs (F12)",
-            column![
-                text(memoria).size(14),
-                text(format!("Versão do documento: {} · Páginas: {} · Blocos: {} · Palavras: {} · Caracteres: {}",
-                    e.versao, e.paginas, e.blocos, e.palavras, e.caracteres)).size(13),
-                text(format!("Modo: {} · Revisões: {} · Arquivo: {}",
-                    e.modo_edicao, e.tem_revisoes, if e.sujo { "não salvo" } else { "salvo" })).size(13),
-                text("F12 alterna o monitor. Não interrompe o conteúdo aberto.")
-                    .size(12).color(COR_TEXTO_MUTED()),
-            ].spacing(12).into(),
-            Msg::FecharAuxiliar(JanelaAux::Monitor),
-        )
+        let nome = self.caminho.as_ref().and_then(|p| p.file_name()).and_then(|n| n.to_str())
+            .map_or_else(|| tr("Documento sem título").to_string(), str::to_string);
+        let metricas = feather_ui::monitor::Metricas {
+            cartoes: vec![
+                (tr("Páginas").into(), e.paginas.to_string(), tr("No documento atual").into()),
+                (tr("Palavras").into(), e.palavras.to_string(), trf("{} caracteres", &[&e.caracteres])),
+                (tr("Blocos").into(), e.blocos.to_string(), tr("Parágrafos, títulos, tabelas e imagens").into()),
+            ],
+            linhas: vec![
+                (tr("Documento").into(), nome),
+                (tr("Estado").into(), tr(if e.sujo { "Alterações não salvas" } else { "Salvo" }).into()),
+                (tr("Modo").into(), tr(&e.modo_edicao).into()),
+                (tr("Revisões").into(), tr(if e.tem_revisoes { "sim" } else { "não" }).into()),
+                (tr("Versão do documento").into(), e.versao.to_string()),
+            ],
+            ocupado: self.ocupado.then(|| tr("Operação de arquivo em andamento").into()),
+        };
+        self.monitor.view(metricas, Msg::MonitorEvento)
     }
 
+    /// Localizar e substituir num painel arredondado no topo da área do documento (o padrão de
+    /// busca da suíte): ícone, campo sem borda, contagem, anterior/próximo e fechar; a seta da
+    /// esquerda abre a linha de Substituir, e as opções são etiquetas que acendem.
     fn view_busca(&self) -> Element<'_, Msg> {
-        container(
-            column![
+        use feather_ui::dialogo as dlg;
+        let campo = |dica: String, valor: &str| {
+            text_input(&dica, valor).padding([6, 4]).size(13).style(|_, _| text_input::Style {
+                background: iced::Color::TRANSPARENT.into(),
+                border: iced::Border::default(),
+                icon: COR_TEXTO_MUTED(),
+                placeholder: COR_TEXTO_MUTED(),
+                value: COR_TEXTO(),
+                selection: COR_HOVER_AZUL(),
+            })
+        };
+        let botao = |nome: &str, dica: &str, msg: Option<Msg>| {
+            iced::widget::tooltip(
+                button(icone(nome, 15.)).padding(5).style(estilo_botao_pequeno(false)).on_press_maybe(msg),
+                text(tr(dica).to_string()).size(11),
+                iced::widget::tooltip::Position::Bottom,
+            )
+            .style(estilo_popup_menu)
+        };
+        let etiqueta = |rotulo: &str, ligada: bool, i: u8| {
+            button(text(tr(rotulo).to_string()).size(11.5))
+                .padding([3, 10])
+                .on_press(Msg::BuscaOpcao(i))
+                .style(move |_, status| button::Style {
+                    background: Some(if ligada { COR_AZUL_FUNDO() } else if status == button::Status::Hovered { COR_HOVER() } else { iced::Color::TRANSPARENT }.into()),
+                    text_color: if ligada { COR_AZUL_ACENTO() } else { COR_TEXTO_MUTED() },
+                    border: iced::Border { color: if ligada { COR_AZUL_ACENTO() } else { COR_BORDA() }, width: 1., radius: 10.into() },
+                    ..Default::default()
+                })
+        };
+        let tem = !self.consulta.is_empty();
+        let localizar = row![
+            botao(if self.substituir_visivel { "chevron-down" } else { "chevron-right" }, "Substituir", Some(Msg::AlternarSubstituir)),
+            icone("search", 16.),
+            campo(tr("Localizar no documento").into(), &self.consulta)
+                .id(text_input::Id::new("busca"))
+                .on_input(Msg::Consulta)
+                .on_submit(Msg::BuscaIr(1))
+                .width(Length::Fill),
+            text(self.busca_contagem.as_str()).size(12).color(COR_TEXTO_MUTED()),
+            botao("chevron-up", "Anterior", tem.then_some(Msg::BuscaIr(-1))),
+            botao("chevron-down", "Próximo (Enter)", tem.then_some(Msg::BuscaIr(1))),
+            botao("x", "Fechar (Esc)", Some(Msg::Cancelar)),
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center);
+        let mut painel = column![localizar].spacing(6);
+        if self.substituir_visivel {
+            painel = painel.push(
                 row![
-                    text_input(tr("consulta"), &self.consulta)
-                        .on_input(Msg::Consulta)
-                        .on_submit(Msg::BuscaIr(1))
-                        .padding(7),
-                    button(text(tr("anterior"))).on_press(Msg::BuscaIr(-1)),
-                    button(text(tr("proximo"))).on_press(Msg::BuscaIr(1)),
-                    button(icone("x", 16.)).on_press(Msg::Cancelar)
+                    Space::with_width(Length::Fixed(25.)),
+                    icone("edit", 16.),
+                    campo(tr("Substituir por").into(), &self.substituicao).on_input(Msg::Substituicao).on_submit(Msg::Substituir(false)).width(Length::Fill),
+                    dlg::botao_secundario(tr("Substituir"), tem.then_some(Msg::Substituir(false))),
+                    dlg::botao_secundario(tr("Substituir tudo"), tem.then_some(Msg::Substituir(true))),
                 ]
-                .spacing(7),
-                row![
-                    text_input(tr("substituicao"), &self.substituicao)
-                        .on_input(Msg::Substituicao)
-                        .padding(7),
-                    button(text(tr("substituir"))).on_press(Msg::Substituir(false)),
-                    button(text(tr("substituir_tudo"))).on_press(Msg::Substituir(true))
-                ]
-                .spacing(7),
-                row![
-                    iced::widget::checkbox("Diferenciar maiúsculas", self.busca_opcoes.maiusculas)
-                        .on_toggle(|_| Msg::BuscaOpcao(0)).size(14).text_size(12),
-                    iced::widget::checkbox("Palavra inteira", self.busca_opcoes.palavra)
-                        .on_toggle(|_| Msg::BuscaOpcao(1)).size(14).text_size(12),
-                    iced::widget::checkbox("Expressão regular", self.busca_opcoes.regex)
-                        .on_toggle(|_| Msg::BuscaOpcao(2)).size(14).text_size(12),
-                ]
-                .spacing(16)
+                .spacing(6)
+                .align_y(Alignment::Center),
+            );
+        }
+        painel = painel.push(
+            row![
+                Space::with_width(Length::Fixed(25.)),
+                etiqueta("Diferenciar maiúsculas", self.busca_opcoes.maiusculas, 0),
+                etiqueta("Palavra inteira", self.busca_opcoes.palavra, 1),
+                etiqueta("Expressão regular", self.busca_opcoes.regex, 2),
             ]
-            .spacing(5),
-        )
-        .padding([8, 14])
-        .style(estilo_painel_faixa)
-        .into()
+            .spacing(6),
+        );
+        let cartao = container(painel)
+            .padding([8, 10])
+            .max_width(620.)
+            .style(|_| container::Style {
+                background: Some(COR_PAINEL().into()),
+                border: iced::Border { color: COR_BORDA_SUAVE(), width: 1., radius: 12.into() },
+                shadow: iced::Shadow { color: COR_SOMBRA(), offset: iced::Vector::new(0., 2.), blur_radius: 8. },
+                ..Default::default()
+            });
+        container(cartao).width(Length::Fill).align_x(iced::alignment::Horizontal::Right).padding([6, 14]).into()
     }
 }
 fn nome_tecla(k: &keyboard::Key) -> String {
@@ -3023,7 +3938,7 @@ mod tests {
         let _ = app.update(Msg::FormCampo(0, "silva2023".into()));
         let _ = app.update(Msg::FormOk);
         assert!(app.formulario.is_none(), "{}", app.status);
-        assert!(format!("{:?}", app.sessao.documento().blocos).contains("(SILVA; SOUZA, 2023)"));
+        assert!(format!("{:?}", app.sessao.documento().blocos).contains("(Silva; Souza, 2023)"));
     }
 
     #[test]
@@ -3088,5 +4003,60 @@ mod tests {
         }
         assert!(crate::pagina::carregar_imagem("https://exemplo.com/imagem.png").is_none());
         assert!(crate::pagina::carregar_imagem("/tmp/imagem.png").is_none());
+    }
+}
+
+/// Os diálogos de arquivo começam na pasta FeatherDocs dos Documentos,
+/// se ela existir.
+/// Abre um endereço ou arquivo no programa que o sistema escolhe (navegador, leitor de PDF).
+/// Abre `alvo` no programa do sistema; uma thread espera o processo terminar, senão ele fica "defunto" até o app fechar.
+fn abrir_no_sistema(alvo: &std::ffi::OsStr) -> std::io::Result<()> {
+    #[cfg(target_os = "windows")]
+    let r = std::process::Command::new("explorer").arg(alvo).spawn();
+    #[cfg(target_os = "macos")]
+    let r = std::process::Command::new("open").arg(alvo).spawn();
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let r = std::process::Command::new("xdg-open").arg(alvo).spawn();
+    let mut filho = r?;
+    std::thread::spawn(move || filho.wait());
+    Ok(())
+}
+
+fn dialogo_de_arquivo() -> rfd::AsyncFileDialog {
+    let casa = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from);
+    let pasta = casa.and_then(|c| ["Documentos", "Documents"].iter().map(|d| c.join(d).join("FeatherDocs")).find(|p| p.is_dir()));
+    match pasta {
+        Some(p) => rfd::AsyncFileDialog::new().set_directory(p),
+        None => rfd::AsyncFileDialog::new(),
+    }
+}
+
+/// O que o painel mostra de um arquivo do projeto.
+pub enum Visto {
+    Texto(String),
+    /// A imagem na resolução original e o tamanho dela em pixels.
+    Imagem(iced::widget::image::Handle, u32, u32),
+    Aviso(String),
+}
+
+/// A data de hoje por extenso no idioma da interface ("18 de outubro de 2026").
+/// shortcut: conta o dia em UTC (sem fuso); perto da meia-noite pode mostrar o dia vizinho.
+fn hoje_por_extenso() -> String {
+    let dias = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() / 86_400) as i64;
+    // Dias desde 1970-01-01 → ano, mês e dia do calendário civil.
+    let z = dias + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let dia = doy - (153 * mp + 2) / 5 + 1;
+    let mes = if mp < 10 { mp + 3 } else { mp - 9 };
+    let ano = yoe + era * 400 + i64::from(mes <= 2);
+    let i = (mes - 1) as usize;
+    match crate::localidade::atual() {
+        "en-US" => format!("{} {dia}, {ano}", ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][i]),
+        "es-ES" => format!("{dia} de {} de {ano}", ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"][i]),
+        _ => format!("{dia} de {} de {ano}", ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"][i]),
     }
 }

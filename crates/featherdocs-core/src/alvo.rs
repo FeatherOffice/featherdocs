@@ -10,7 +10,7 @@ pub type Cel = Option<(u32, u32)>;
 
 /// O bloco não tem texto: o cursor o trata como uma coisa só.
 pub fn eh_atomico(c: &Conteudo) -> bool {
-    matches!(c, Conteudo::Regua | Conteudo::QuebraDePagina | Conteudo::Sumario { .. } | Conteudo::Imagem { .. } | Conteudo::Bibliografia { .. } | Conteudo::IndiceRemissivo)
+    matches!(c, Conteudo::Regua | Conteudo::QuebraDePagina | Conteudo::QuebraDeColuna | Conteudo::QuebraDeSecao { .. } | Conteudo::Sumario { .. } | Conteudo::Imagem { .. } | Conteudo::Bibliografia { .. } | Conteudo::IndiceRemissivo)
 }
 
 /// Código e equação guardam texto cru (sem formatação) e aceitam quebra de linha.

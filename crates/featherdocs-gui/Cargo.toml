@@ -11,13 +11,17 @@ feather-image = { git = "https://github.com/FeatherOffice/feather-io", tag = "v0
 featherdocs-tabelas = { path = "../featherdocs-tabelas" }
 featherdocs-core = { path = "../featherdocs-core" }
 featherdocs-io = { path = "../featherdocs-io" }
+# As versões dentro do .fdoz (o Git embutido): salvar acrescenta uma, sem apagar as antigas.
+featherdocs-historico = { path = "../featherdocs-historico" }
 # Desenha os glifos das fórmulas (contornos da Latin Modern Math embutida).
 feather-math = { path = "../feather-math" }
-iced = { version = "0.13", features = ["canvas", "image", "svg", "tokio", "advanced"] }
+iced = { version = "0.13", features = ["canvas", "image", "svg", "tokio", "advanced", "lazy"] }
 rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
 tokio = { version = "1", features = ["rt"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# O idioma do sistema escolhe o da interface na primeira abertura.
+sys-locale = "0.3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 resvg = "0.42"
 
@@ -32,3 +36,7 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+
+# Provisório: feather-draw com fonte embutida, links e marcadores no PDF (ainda sem tag publicada).
+[patch."https://github.com/FeatherOffice/feather-draw"]
+feather-draw = { path = "../../../feather-draw" }

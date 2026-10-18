@@ -9,7 +9,7 @@ description = "Ler e gravar os arquivos do FeatherDocs: .fdoz (próprio), Markdo
 # - `zip` (deflate): o contêiner .fdoz e o .docx (que também é um ZIP);
 # - `arrow` (só IPC, a mesma versão do `feathersheet-io`): o documento dentro do .fdoz é Arrow
 #   colunar, como o `.fshz` da planilha — nada de JSON no arquivo;
-# - `serde_json`: os comandos da ponte (o arquivo não usa mais);
+# - `serde_json`: o vínculo do gráfico com os dados, guardado dentro do SVG;
 # - `pulldown-cmark`: o leitor de Markdown (CommonMark), o mais rápido do ecossistema —
 #   é um leitor por eventos, sem montar árvore intermediária;
 # - `quick-xml`: o XML do .docx, lido em fluxo (sem carregar a árvore DOM inteira).
