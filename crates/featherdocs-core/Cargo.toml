@@ -1,0 +1,25 @@
+[package]
+name = "featherdocs-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77.2"
+description = "O motor do FeatherDocs: o documento (árvore de blocos), a paginação determinística, a edição com desfazer e o quadro de cada página."
+
+# Só `serde` e `regex` (Rust puro, também em WebAssembly; vem do Localizar com expressão regular), de propósito pouco: o motor compila em segundos e
+# roda no app, no teste e em WebAssembly. Ler e gravar arquivo (Markdown, LaTeX,
+# .docx, .fdoz) é do `featherdocs-io`.
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+regex = { version = "1", default-features = false, features = ["std", "unicode", "perf"] }
+# As fórmulas matemáticas (`$…$`, equações em destaque) são compostas pelo motor comum da suíte,
+# Rust puro com a fonte Latin Modern Math embutida (só `ttf-parser` por baixo).
+feather-math = { path = "../feather-math" }
+
+[lib]
+name = "featherdocs_core"
+
+# Ligados no primeiro commit (RECEITA.md §4). `#[allow]` para calar não passa:
+# quebre a função.
+[lints.clippy]
+too_many_lines = "deny"
+cognitive_complexity = "deny"

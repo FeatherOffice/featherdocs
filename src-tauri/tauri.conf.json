@@ -1,0 +1,50 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "FeatherDocs",
+  "version": "0.1.0",
+  "identifier": "br.featherdocs.app",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5175",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "FeatherDocs",
+        "width": 1280,
+        "height": 860,
+        "minWidth": 760,
+        "minHeight": 520,
+        "resizable": true,
+        "label": "main"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ipc: http://ipc.localhost ponte: http://ponte.localhost; worker-src 'self' blob:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "appimage", "rpm", "nsis", "msi"],
+    "category": "Office",
+    "shortDescription": "Editor de documentos que lê Markdown, LaTeX e Word",
+    "longDescription": "FeatherDocs — editor de documentos da suíte FeatherOffice. Motor em Rust, paginação determinística, lê e grava .fdoz e lê Markdown, LaTeX e .docx. Sem conta e sem telemetria.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/64x64.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "fileAssociations": [
+      { "ext": ["fdoz"], "name": "Documento do FeatherDocs", "description": "Documento do FeatherDocs", "mimeType": "application/x-featherdocs", "role": "Editor" },
+      { "ext": ["md", "markdown"], "name": "Markdown", "mimeType": "text/markdown", "role": "Viewer" },
+      { "ext": ["tex"], "name": "LaTeX", "mimeType": "text/x-tex", "role": "Viewer" },
+      { "ext": ["docx"], "name": "Documento do Word", "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "role": "Viewer" }
+    ]
+  }
+}

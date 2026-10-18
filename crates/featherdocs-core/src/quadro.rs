@@ -1,0 +1,378 @@
+//! O quadro de uma página: tudo que a interface precisa para pintá-la, já
+//! pronto e em binário (little-endian), e o teste de acerto do clique.
+//!
+//! ```text
+//! 0                                   nada mudou (a versão que a interface tem ainda vale)
+//! 1 | u64 versão | f32 largura | f32 altura | u32 n | n operações
+//!
+//! operação:  1 Texto      f32 x, f32 y(base), f32 tamanho, u8 estilo, u32 cor, u16 n, n bytes UTF-8
+//!            2 Retângulo  f32 x, y, w, h, u32 cor
+//!            3 Traço      f32 x1, y1, x2, y2, espessura, u32 cor
+//!            4 Imagem     f32 x, y, w, h, u16 n, n bytes UTF-8 (a origem)
+//!            5 Girado     f32 x, y (centro), f32 tamanho, f32 ângulo (graus, anti-horário), u8 estilo, u32 cor, u16 n, n bytes
+//! ```
+//!
+//! Coordenadas em pontos, do canto superior esquerdo da página. O cabeçalho e o rodapé
+//! (com os campos resolvidos), o plano de fundo, as marcas de formatação e os pontilhados
+//! do sumário saem daqui, calculados em Rust.
+
+use crate::layout::{Deco, Linha, COR_CINZA, COR_TEXTO, CORPO};
+use crate::medida::largura;
+use crate::paginacao::Fatia;
+use crate::modelo::NumeracaoDeLinhas;
+use crate::sessao::Sessao;
+
+pub const OP_TEXTO: u8 = 1;
+pub const OP_RETANGULO: u8 = 2;
+pub const OP_TRACO: u8 = 3;
+pub const OP_IMAGEM: u8 = 4;
+pub const OP_GIRADO: u8 = 5;
+
+/// A cor das marcas de formatação (¶ e ·).
+const COR_MARCA: u32 = 0x7a8f_b8ff;
+
+#[derive(Default)]
+struct Escritor {
+    bytes: Vec<u8>,
+    ops: u32,
+}
+
+impl Escritor {
+    fn f(&mut self, v: f32) {
+        self.bytes.extend_from_slice(&v.to_le_bytes());
+    }
+    fn texto(&mut self, x: f32, y: f32, tamanho: f32, estilo: u8, cor: u32, t: &str) {
+        let t = &t.as_bytes()[..t.len().min(usize::from(u16::MAX))];
+        self.bytes.push(OP_TEXTO);
+        for v in [x, y, tamanho] {
+            self.f(v);
+        }
+        self.bytes.push(estilo);
+        self.bytes.extend_from_slice(&cor.to_le_bytes());
+        self.bytes.extend_from_slice(&(t.len() as u16).to_le_bytes());
+        self.bytes.extend_from_slice(t);
+        self.ops += 1;
+    }
+    fn retangulo(&mut self, x: f32, y: f32, w: f32, h: f32, cor: u32) {
+        self.bytes.push(OP_RETANGULO);
+        for v in [x, y, w, h] {
+            self.f(v);
+        }
+        self.bytes.extend_from_slice(&cor.to_le_bytes());
+        self.ops += 1;
+    }
+    fn traco(&mut self, p: [f32; 5], cor: u32) {
+        self.bytes.push(OP_TRACO);
+        for v in p {
+            self.f(v);
+        }
+        self.bytes.extend_from_slice(&cor.to_le_bytes());
+        self.ops += 1;
+    }
+    /// `centro` = (x, y) do meio do texto; `medida` = (tamanho, ângulo em graus).
+    fn girado(&mut self, centro: [f32; 2], medida: [f32; 2], estilo: u8, cor: u32, t: &str) {
+        let ([x, y], [tamanho, angulo]) = (centro, medida);
+        let t = &t.as_bytes()[..t.len().min(usize::from(u16::MAX))];
+        self.bytes.push(OP_GIRADO);
+        for v in [x, y, tamanho, angulo] {
+            self.f(v);
+        }
+        self.bytes.push(estilo);
+        self.bytes.extend_from_slice(&cor.to_le_bytes());
+        self.bytes.extend_from_slice(&(t.len() as u16).to_le_bytes());
+        self.bytes.extend_from_slice(t);
+        self.ops += 1;
+    }
+    fn imagem(&mut self, r: [f32; 4], origem: &str) {
+        let o = &origem.as_bytes()[..origem.len().min(usize::from(u16::MAX))];
+        self.bytes.push(OP_IMAGEM);
+        for v in r {
+            self.f(v);
+        }
+        self.bytes.extend_from_slice(&(o.len() as u16).to_le_bytes());
+        self.bytes.extend_from_slice(o);
+        self.ops += 1;
+    }
+}
+
+impl Sessao {
+    /// O quadro da `pagina` (0, 1…); `[0]` se a interface já tem esta `versao`.
+    pub fn quadro(&self, pagina: usize, versao_conhecida: u64) -> Result<Vec<u8>, String> {
+        if versao_conhecida == self.versao {
+            return Ok(vec![0]);
+        }
+        let p = self.paginas.get(pagina).ok_or_else(|| format!("A página {} não existe (há {}).", pagina + 1, self.paginas.len()))?;
+        let mut e = Escritor::default();
+        self.plano_de_fundo(&mut e);
+        if self.grade {
+            self.linhas_de_grade(&mut e);
+        }
+        let mut linha = if self.doc.extras.numerar_linhas == NumeracaoDeLinhas::Continua { self.linhas_antes(pagina) } else { 0 };
+        for f in &p.fatias {
+            self.fatia(&mut e, f, &mut linha);
+        }
+        self.notas_da_pagina(&mut e, pagina);
+        self.cabecalho_e_rodape(&mut e, pagina);
+        let cfg = self.doc.pagina;
+        let mut saida = vec![1u8];
+        saida.extend_from_slice(&self.versao.to_le_bytes());
+        saida.extend_from_slice(&cfg.largura.to_le_bytes());
+        saida.extend_from_slice(&cfg.altura.to_le_bytes());
+        saida.extend_from_slice(&e.ops.to_le_bytes());
+        saida.extend_from_slice(&e.bytes);
+        Ok(saida)
+    }
+
+    /// Quantas linhas numeráveis (de texto corrido) vêm antes da página `pagina`.
+    pub(crate) fn linhas_antes(&self, pagina: usize) -> usize {
+        self.paginas[..pagina].iter().flat_map(|p| &p.fatias).filter(|f| crate::digitacao::tem_texto_corrido(&self.doc.blocos[f.bloco].conteudo)).map(|f| f.ate - f.de).sum()
+    }
+
+    /// Uma grade de 0,5 cm sobre a área do texto, bem clara (Exibir → Linhas de grade).
+    fn linhas_de_grade(&self, e: &mut Escritor) {
+        const PASSO: f32 = 72.0 / 2.54 / 2.0;
+        const COR: u32 = 0xc8d2_e6aa;
+        let cfg = self.doc.pagina;
+        let (x1, y1, x2, y2) = (cfg.margem_esq, cfg.margem_sup, cfg.largura - cfg.margem_dir, cfg.altura - cfg.margem_inf);
+        let mut y = y1;
+        while y <= y2 + 0.01 {
+            e.traco([x1, y, x2, y, 0.4], COR);
+            y += PASSO;
+        }
+        let mut x = x1;
+        while x <= x2 + 0.01 {
+            e.traco([x, y1, x, y2, 0.4], COR);
+            x += PASSO;
+        }
+    }
+
+    fn fatia(&self, e: &mut Escritor, f: &Fatia, numero: &mut usize) {
+        let cfg = self.doc.pagina;
+        let lay = &self.layouts[f.bloco];
+        let mut y = cfg.margem_sup + f.y;
+        let texto = crate::digitacao::tem_texto_corrido(&self.doc.blocos[f.bloco].conteudo);
+        let numerar = texto && self.doc.extras.numerar_linhas != NumeracaoDeLinhas::Nenhuma;
+        for (k, linha) in lay.linhas[f.de..f.ate].iter().enumerate() {
+            self.linha(e, linha, cfg.margem_esq, y);
+            if !linha.comentarios.is_empty() {
+                self.baloes(e, linha, y);
+            }
+            if numerar {
+                // O número fica na margem esquerda, alinhado à direita a 0,5 cm do texto, na linha de base.
+                *numero += 1;
+                let n = numero.to_string();
+                let base = linha.pedacos.first().map_or(linha.base, |p| p.y);
+                e.texto(cfg.margem_esq - 14.0 - largura(&n, 0, 8.0), y + base, 8.0, 0, COR_CINZA, &n);
+            }
+            if self.marcas && texto && f.de + k + 1 == lay.linhas.len() {
+                pilcrow(e, linha, cfg.margem_esq, y);
+            }
+            if let (Some(n), true) = (&lay.numero, k == 0 && f.de == 0) {
+                let base = linha.pedacos.first().map_or(linha.base, |p| p.y);
+                e.texto(cfg.margem_esq + n.x, y + base, n.tamanho, n.estilo, n.cor, &n.texto);
+            }
+            if let (Some(m), Some(x)) = (&f.marcador, lay.marcador_x) {
+                if k == 0 {
+                    let base = linha.pedacos.first().map_or(linha.altura * 0.7, |p| p.y);
+                    let tam = if linha.tam > 0.0 { linha.tam } else { CORPO };
+                    let cor = if lay.cor_marcador != 0 { lay.cor_marcador } else { COR_TEXTO };
+                    e.texto(cfg.margem_esq + x, y + base, tam, 0, cor, m);
+                }
+            }
+            y += linha.altura;
+        }
+    }
+
+    fn linha(&self, e: &mut Escritor, l: &Linha, x0: f32, y0: f32) {
+        for d in &l.deco {
+            match d {
+                Deco::Retangulo { x, y, w, h, cor } => e.retangulo(x0 + x, y0 + y, *w, *h, *cor),
+                Deco::Traco { x1, y1, x2, y2, espessura, cor } => e.traco([x0 + x1, y0 + y1, x0 + x2, y0 + y2, *espessura], *cor),
+                Deco::Imagem { x, y, w, h, origem } => e.imagem([x0 + x, y0 + y, *w, *h], origem),
+                Deco::Texto { x, y, texto, tamanho, estilo, cor } => e.texto(x0 + x, y0 + y, *tamanho, *estilo, *cor, texto),
+            }
+        }
+        for p in l.pedacos.iter().filter(|p| p.realce != 0) {
+            let w = largura(&p.texto, p.estilo, p.tamanho);
+            e.retangulo(x0 + p.x, y0 + p.y - p.tamanho * 0.95 - p.desloc, w, p.tamanho * 1.2, p.realce);
+        }
+        for p in &l.pedacos {
+            e.texto(x0 + p.x, y0 + p.y - p.desloc, p.tamanho, p.estilo, p.cor, &p.texto);
+            if self.marcas && p.texto.contains(' ') && p.estilo & crate::modelo::MATEMATICA == 0 {
+                pontos_nos_espacos(e, p, x0, y0);
+            }
+        }
+        if let (Some(alvo), true) = (l.alvo, l.sumario & 1 != 0) {
+            self.numero_do_sumario(e, l, alvo, x0, y0);
+        }
+    }
+
+    /// Um balão na margem direita para cada comentário que começa na linha (aberto em amarelo,
+    /// resolvido em cinza).
+    fn baloes(&self, e: &mut Escritor, l: &Linha, y: f32) {
+        let x = self.doc.pagina.largura - self.doc.pagina.margem_dir + 10.0;
+        for (k, id) in l.comentarios.iter().enumerate() {
+            let resolvido = self.doc.comentarios.iter().find(|c| c.id == *id).is_some_and(|c| c.resolvido);
+            let cor = if resolvido { 0xdadc_e0ff } else { 0xfbbc_04ff };
+            let (bx, by) = (x + k as f32 * 16.0, y + 1.0);
+            e.retangulo(bx, by, 12.0, 9.0, cor);
+            e.traco([bx + 2.0, by + 9.0, bx + 2.0, by + 12.0, 1.5], cor);
+        }
+    }
+
+    /// O traço e as notas de rodapé no pé da página; o título e as notas de fim onde a paginação as pôs.
+    fn notas_da_pagina(&self, e: &mut Escritor, pagina: usize) {
+        let cfg = self.doc.pagina;
+        if let Some(y) = self.topo_das_notas(pagina) {
+            e.traco([cfg.margem_esq, y, cfg.margem_esq + cfg.largura_util() / 3.0, y, 0.5], COR_TEXTO);
+        }
+        for c in self.caixas_das_notas(pagina) {
+            let Some(n) = self.nota_composta(c.nota) else { continue };
+            let mut y = c.y;
+            for l in &n.linhas {
+                self.linha(e, l, cfg.margem_esq, y);
+                y += l.altura;
+            }
+        }
+        if let Some((topo, _)) = self.paginas[pagina].notas_fim.iter().find(|(_, r)| r.is_none()) {
+            let y = cfg.margem_sup + topo + crate::objetos::TITULO_DAS_NOTAS * 0.6;
+            e.texto(cfg.margem_esq, y, 15.0, crate::modelo::NEGRITO, COR_TEXTO, self.titulo_das_notas());
+        }
+    }
+
+    /// Pontilhado e número da página, alinhado à direita da área útil.
+    fn numero_do_sumario(&self, e: &mut Escritor, l: &Linha, alvo: u64, x0: f32, y0: f32) {
+        let Some(p) = l.pedacos.first() else { return };
+        let numero = self.pagina_do_bloco(alvo).map_or("?".to_string(), |n| (n + 1).to_string());
+        let direita = x0 + self.doc.pagina.largura_util();
+        let w_num = largura(&numero, p.estilo, p.tamanho);
+        let fim_texto = x0 + p.x + largura(&p.texto, p.estilo, p.tamanho);
+        let disponivel = direita - w_num - fim_texto - 8.0;
+        let w_ponto = largura(". ", 0, p.tamanho);
+        if l.sumario & 2 != 0 && disponivel > w_ponto {
+            let pontos = ". ".repeat((disponivel / w_ponto) as usize);
+            e.texto(fim_texto + 4.0, y0 + p.y, p.tamanho, 0, COR_CINZA, &pontos);
+        }
+        e.texto(direita - w_num, y0 + p.y, p.tamanho, p.estilo, p.cor, &numero);
+    }
+
+    /// Cor do papel, marca d'água na diagonal e borda da página (antes do texto, que fica por cima).
+    fn plano_de_fundo(&self, e: &mut Escritor) {
+        let (cfg, x) = (self.doc.pagina, &self.doc.extras);
+        if x.cor_pagina != 0 {
+            e.retangulo(0.0, 0.0, cfg.largura, cfg.altura, x.cor_pagina);
+        }
+        if !x.marca.is_empty() {
+            // O texto ocupa uns 70% da diagonal; a cor padrão é um cinza bem claro.
+            let diagonal = cfg.largura.hypot(cfg.altura);
+            let angulo = (cfg.altura / cfg.largura).atan().to_degrees();
+            let w1000 = largura(&x.marca, crate::modelo::NEGRITO, 1000.0) / 1000.0;
+            let tamanho = (diagonal * 0.7 / w1000.max(0.1)).min(cfg.altura * 0.25);
+            let cor = if x.marca_cor != 0 { x.marca_cor } else { 0xc0c0_c066 };
+            e.girado([cfg.largura / 2.0, cfg.altura / 2.0], [tamanho, angulo], crate::modelo::NEGRITO, cor, &x.marca);
+        }
+        if x.borda_cor != 0 {
+            let d = x.borda_distancia.max(0.0);
+            let (x1, y1, x2, y2) = (d, d, cfg.largura - d, cfg.altura - d);
+            let w = x.borda_espessura.max(0.25);
+            for p in [[x1, y1, x2, y1, w], [x2, y1, x2, y2, w], [x2, y2, x1, y2, w], [x1, y2, x1, y1, w]] {
+                e.traco(p, x.borda_cor);
+            }
+        }
+    }
+
+    /// Cabeçalho e rodapé: três lugares (esquerda, centro, direita) com os campos resolvidos.
+    fn cabecalho_e_rodape(&self, e: &mut Escritor, pagina: usize) {
+        let x = &self.doc.extras;
+        if x.primeira_diferente && pagina == 0 {
+            return;
+        }
+        let cfg = self.doc.pagina;
+        self.faixas(e, &x.cabecalho, cfg.margem_sup / 2.0 + 3.0, pagina);
+        self.faixas(e, &x.rodape, cfg.altura - cfg.margem_inf / 2.0 + 3.0, pagina);
+    }
+
+    fn faixas(&self, e: &mut Escritor, f: &crate::modelo::Faixas, y: f32, pagina: usize) {
+        let cfg = self.doc.pagina;
+        let tam = 9.0;
+        for (texto, onde) in [(&f.esquerda, 0), (&f.centro, 1), (&f.direita, 2)] {
+            if texto.is_empty() {
+                continue;
+            }
+            let t = self.resolver_campos(texto, pagina);
+            let w = largura(&t, 0, tam);
+            let x = match onde {
+                0 => cfg.margem_esq,
+                1 => (cfg.largura - w) / 2.0,
+                _ => cfg.largura - cfg.margem_dir - w,
+            };
+            e.texto(x, y, tam, 0, COR_CINZA, &t);
+        }
+    }
+
+    /// Troca `{pagina}`, `{total}`, `{pagina_romano}`, `{titulo}` e `{autor}` pelos valores desta página.
+    pub fn resolver_campos(&self, texto: &str, pagina: usize) -> String {
+        texto
+            .replace("{pagina_romano}", &crate::paginacao::romano(pagina as u32 + 1).to_lowercase())
+            .replace("{pagina}", &(pagina + 1).to_string())
+            .replace("{total}", &self.paginas.len().to_string())
+            .replace("{titulo}", &self.doc.meta.titulo)
+            .replace("{autor}", &self.doc.meta.autor)
+    }
+}
+
+/// O ¶ no fim do parágrafo (marcas de formatação).
+fn pilcrow(e: &mut Escritor, l: &Linha, x0: f32, y0: f32) {
+    let (x, base, tam) = match l.pedacos.last() {
+        Some(p) => (p.x + largura(&p.texto, p.estilo, p.tamanho), p.y, p.tamanho),
+        None => (l.x0, l.base, l.tam),
+    };
+    e.texto(x0 + x + 1.0, y0 + base, tam, 0, COR_MARCA, "¶");
+}
+
+/// Um ponto no meio de cada espaço do pedaço (marcas de formatação).
+fn pontos_nos_espacos(e: &mut Escritor, p: &crate::layout::Pedaco, x0: f32, y0: f32) {
+    let mut x = p.x;
+    for c in p.texto.chars() {
+        let w = f32::from(crate::medida::largura_do_caractere(c, p.estilo)) * p.tamanho / 1000.0;
+        if c == ' ' {
+            let wp = largura("·", 0, p.tamanho);
+            e.texto(x0 + x + (w - wp) / 2.0, y0 + p.y - p.desloc, p.tamanho, 0, COR_MARCA, "·");
+        }
+        x += w;
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use super::*;
+
+    #[test]
+    fn versao_conhecida_devolve_um_byte() {
+        let s = Sessao::default();
+        assert_eq!(s.quadro(0, s.versao()).unwrap(), vec![0]);
+    }
+
+    #[test]
+    fn quadro_tem_cabecalho_e_numero_de_pagina() {
+        let s = Sessao::default();
+        let q = s.quadro(0, 0).unwrap();
+        assert_eq!(q[0], 1);
+        let n = u32::from_le_bytes(q[17..21].try_into().unwrap());
+        assert!(n >= 1, "ao menos o número da página");
+    }
+
+    #[test]
+    fn nota_de_rodape_sai_no_pe_com_o_traco() {
+        let mut s = Sessao::default();
+        s.nota_inserir(false, "texto da nota").unwrap();
+        let q = s.quadro(0, 0).unwrap();
+        let achou = q.windows(13).any(|w| w == b"texto da nota");
+        assert!(achou, "o texto da nota está no quadro");
+    }
+
+    #[test]
+    fn pagina_inexistente_e_erro_em_portugues() {
+        assert!(Sessao::default().quadro(7, 0).unwrap_err().contains("não existe"));
+    }
+}

@@ -1,0 +1,475 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Two Column Curriculum Vitae XeLaTeX Template
+%
+% This template has been downloaded from:
+% http://www.latextemplates.com/template/two-column-one-page-cv
+%
+% Original author:
+% Alessandro (The CV Inn)
+%
+% IMPORTANT: THIS TEMPLATE NEEDS TO BE COMPILED WITH XeLaTeX
+%
+% This template uses several fonts not included with Windows/Linux by
+% default. If you get compilation errors saying a font is missing, find the line
+% on which the font is used and either change it to a font included with your
+% operating system or comment the line out to use the default font.
+%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%----------------------------------------------------------------------------------------
+%	PACKAGES AND OTHER DOCUMENT CONFIGURATIONS
+%----------------------------------------------------------------------------------------
+
+\documentclass[a4paper,10pt]{article} % Font size (10pt, 11pt or 12pt)
+
+\usepackage[ngerman]{babel} % this is needed for umlauts
+\usepackage[hmargin=1.25cm, vmargin=1.0cm]{geometry} % Document margins
+\usepackage{marvosym} % Required for symbols in the colored box
+\usepackage{ifsym} % Required for symbols in the colored box
+\usepackage{pdfpages}  % Signatureinbingung und includepdf
+\usepackage{csquotes}
+\usepackage{xcolor} % Allows the definition of hex colors
+
+% Fonts and tweaks for XeLaTeX
+\usepackage{fontspec,xltxtra,xunicode}
+\defaultfontfeatures{Mapping=tex-text}
+\setromanfont[Mapping=tex-text]{Times New Roman} % Main document font
+\setsansfont[Scale=MatchLowercase,Mapping=tex-text]{Arial} % Font for your name at the top
+%\setmonofont[Scale=MatchLowercase]{Andale Mono}
+
+% Colors for links, text and headings
+\usepackage{hyperref}
+\definecolor{linkcolor}{HTML}{506266} % Blue-gray color for links
+\definecolor{shade}{HTML}{F5DD9D} % Peach color for the contact information box
+\definecolor{text1}{HTML}{2b2b2b} % Main document font color, off-black
+\definecolor{headings}{HTML}{701112} % Dark red color for headings
+% Other color palettes: shade=B9D7D9 and linkcolor=A40000; shade=D4D7FE and linkcolor=FF0080
+
+\hypersetup{colorlinks,breaklinks, urlcolor=linkcolor, linkcolor=linkcolor} % Set up links and colors
+
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+% Headers and footers can be added with the \lhead{} \rhead{} \lfoot{} \rfoot{} commands
+% Example footer:
+%\rfoot{\color{headings} {\sffamily Last update: \today}. Typeset with Xe\LaTeX}
+
+\renewcommand{\headrulewidth}{0pt} % Get rid of the default rule in the header
+
+\usepackage{titlesec} % Allows creating custom \section's
+\usepackage{microtype}
+
+% Format of the section titles
+\titleformat{\section}{\color{headings}
+\scshape\Large\raggedright}{}{0em}{}[\color{black}\titlerule]
+
+\titlespacing{\section}{0pt}{0pt}{5pt} % Spacing around titles
+
+\newcommand{\ts}{\textsuperscript}
+
+\hypersetup{
+  pdfauthor   = {Martin Thoma},
+  pdfkeywords = {Martin Thoma,KIT,CV},
+  pdftitle    = {Curriculum Vitae of Martin Thoma}
+}
+
+\usepackage{microtype}
+
+\begin{document}
+
+\color{text1} % Sets the default text color for the whole document
+
+%----------------------------------------------------------------------------------------
+%	TITLE
+%----------------------------------------------------------------------------------------
+
+\par{\centering{\sffamily\Huge Martin Thoma}\\ % Your name
+{\Huge \color{headings}\fontspec{LTZapfino One} Curriculum {Vit\fontspec{LTZapfino One}\ae}\\[15pt]\par}
+
+%----------------------------------------------------------------------------------------
+
+% Start the left-hand side of the page
+\begin{minipage}[t]{0.5\textwidth}
+\vspace{0pt} % Trick for alignment
+
+%----------------------------------------------------------------------------------------
+%	WORK EXPERIENCE
+%----------------------------------------------------------------------------------------
+
+\section{Work Experience}
+%----------------------------------------------------------------------------------------
+% WORK EXPERIENCE -0-
+
+{\raggedleft\textsc{2021}\par}
+
+{\raggedright\large Senior Backend/DLT Developer\\
+\textit{Building Django Backends for Cashlink}\\[5pt]}
+
+\normalsize{Cashlink is a Blockchain/FinTech Startup with an incredible team.
+I'm improving the overall code quality and implementing new features. The 
+environment is highly asynchronous.}\\
+
+%----------------------------------------------------------------------------------------
+% WORK EXPERIENCE -0-
+
+{\raggedleft\textsc{2017 - 2021}\par}
+
+{\raggedright\large IT Consultant for Netlight Consulting GmbH\\
+\textit{Building ML applications and Data Science tasks}\\[5pt]}
+
+\normalsize{I've built a dynamic pricing system using reinforcement learning, a recommendation engine at a video streaming service, helped to build and establish a local and offshore data science team at an SDAX company. The analytical tasks involved A/B tests, churn analysis, fraud prediction.\\
+My work typically was done with Python, sklearn / NumPy / \href{https://arxiv.org/pdf/1907.10121.pdf}{SciPy}, Keras (Tensorflow backend), XGBoost,
+Jupyter Notebooks, Pandas, pytest, Flask and nginx. Usually in teams using
+Scrum or Kanban and Jira / Confluence. Often Packaging, Docker, AWS S3, ECR /
+ECS, DynamoDB, Cloudwatch. Sometimes MySQL, PostgreSQL, or SQLite. Of course, using git.
+Occassionally, Kafka, GraphQL, building REST APIs and Selenium were involved. Recently, I worked on security topics (AppSec, SDLC, SCA, SAST, DAST, threat modeling).}\\
+
+%----------------------------------------------------------------------------------------
+% WORK EXPERIENCE -0-
+
+{\raggedleft\textsc{2014}\par}
+
+{\raggedright\large Student research assistant\\
+\textit{Developing neural nets for handwriting recognition}\\[5pt]}
+
+\normalsize{My bachelors thesis includes getting on-line data of handwritten
+mathematical symbols, preprocessing, extracting features and using neural nets
+to classify those symbols. The data was collected with \href{http://write-math.com}{write-math.com}. All results are available there, too.}\\
+
+%----------------------------------------------------------------------------------------
+% WORK EXPERIENCE -0-
+
+{\raggedleft\textsc{2013 - 2015}\par}
+
+{\raggedright\large Software Developer\\
+\textit{Building a continuous learning architecture for KIT}\\[5pt]}
+
+\normalsize{I've implemented and integrated an unsupervised acoustic model training framework into KIT lecture translator system for automatic model adaption.}\\
+
+%----------------------------------------------------------------------------------------
+% WORK EXPERIENCE -0-
+
+{\raggedleft\textsc{2012 - 2013}\par}
+
+{\raggedright\large Tutor for programming \& Scientific lector\\
+\textit{Teaching, \LaTeX{}, Computer Science}\\[5pt]}
+
+\normalsize{Teaching students coding conventions and basic OOP in Java;
+improving a script for computer engineering.}\hfill \href{http://martin-thoma.com/programmieren-tutorium/#Folien}{$\rightarrow$ presentations}\\
+
+%----------------------------------------------------------------------------------------
+% WORK EXPERIENCE -1-
+
+{\raggedleft\textsc{2011}\par}
+
+{\raggedright\large Freelancer at KTC\\
+\textit{Programming for a consulting company}\\[5pt]}
+
+\normalsize{At KTC, I gained first experiences with a business rule engine
+and a big, but algorithmically not challenging project. It was my first contact
+with Consulting and Java, working for DAX companies.}\\
+
+
+\end{minipage} % End left-hand side of the page
+\hfill
+% Start the right-hand side of the page
+\begin{minipage}[t]{0.44\textwidth}
+\vspace{0pt} %trick for alignment
+
+%----------------------------------------------------------------------------------------
+%	COLORED BOX
+%----------------------------------------------------------------------------------------
+
+\colorbox{shade}{\textcolor{text1}{
+\begin{tabular}{c|p{7cm}}
+\raisebox{-4pt}{\textifsymbol{18}} & Alte Allee 107, 81245 Munich \\ % Address
+\raisebox{-3pt}{\Mobilefone} & +49 $($1636$)$ 28 04 91 \\ % Phone number
+\raisebox{-1pt}{\Letter} & \href{mailto:info@martin-thoma.de}{info@martin-thoma.de} \\ % Email address
+\Keyboard & \href{http://martin-thoma.com}{martin-thoma.com} \\ % Website
+\end{tabular}
+}
+}\\[10pt]
+
+%----------------------------------------------------------------------------------------
+%	EDUCATION
+%----------------------------------------------------------------------------------------
+
+\section{Education}
+
+\begin{tabular}{rl} % Start a table with two columns, one for dates and one for qualifications
+
+%----------------------------------------------------------------------------------------
+% EDUCATION -1-
+
+2014 -- 2017 & \textbf{Master of Science} (\textsc{Computer Science})\\
+& Thesis about {\textbf{\color{headings}Analysis and Optimization}}\\
+& {\textbf{\color{headings}of Convolutional Neural Network}}\\
+& {\textbf{\color{headings}Architectures}} (\textbf{\href{https://arxiv.org/abs/1707.09725}{Link}})\\
+& \textit{Karlsruhe Institute of Technology}\\
+&\\
+
+%----------------------------------------------------------------------------------------
+% EDUCATION -2-
+
+2011 -- 2014 & \textbf{Bachelor of Science} (\textsc{Computer Science})\\
+& \textit{Karlsruhe Institute of Technology} (KIT)\\
+& \textit{Carnegie Mellon University} (CMU)\\
+& Thesis about {\textbf{\color{headings}On-line Recognition of}}\\
+& {\textbf{\color{headings}Handwritten Mathematical Symbols}} (\textbf{\href{http://martin-thoma.com/write-math/}{Link}})\\
+&\\
+
+%----------------------------------------------------------------------------------------
+
+\end{tabular}\\[10pt]
+
+%----------------------------------------------------------------------------------------
+%	AWARDS
+%----------------------------------------------------------------------------------------
+
+\section{Awards}
+
+\begin{tabular}{rl}
+2013 & \textbf{German Academic Scholarship Foundation}\\
+& \textit{Permanent Membership was granted}\\ \\
+
+%----------------------------------------------------------------------------------------
+
+2010	 & \textbf{Winner Bundeswettbewerb Informatik}\\
+& \textit{Federal Competition for Computer Science}\\ \\
+
+%----------------------------------------------------------------------------------------
+
+2008	 & \textbf{1st prize}\\
+& \textit{data analysis competition at University of Augsburg}\\[10pt]
+
+%----------------------------------------------------------------------------------------
+
+% 2008	 & \textbf{Award for social commitment}\\
+% & \textit{Paul-Klee-Gymnasium}
+% \\[10pt]
+
+%----------------------------------------------------------------------------------------
+
+2007	 & \textbf{Prize for science and research}\\
+& \textit{FOCUS pupils competition}
+\end{tabular}\\[10pt]
+
+%----------------------------------------------------------------------------------------
+%	COMPUTER SKILLS
+%----------------------------------------------------------------------------------------
+
+\section{Technological Stack}
+
+\begin{tabular}{ll}
+\textbf{Basics}& \textsc{JavaScript}, jQuery, \textsc{Linux}, \textsc{SQL}, \\
+               & AWS (S3, EC2, ECR / ECS, Lambda, \\
+               & Sagemaker), \textsc{PHP}, GraphQL, Django\\ \\
+\textbf{Intermediate} & \LaTeX, \textsc{Java}, \textsc{HTML}, \textsc{CSS}, SQLAlchemy\\
+               & \href{https://martin-thoma.com/docker/}{Docker}, git, \href{https://levelup.gitconnected.com/ci-pipelines-for-python-projects-9ac2830d2e38}{CI/CD pipelines}\\ \\
+\textbf{Expert} & \textsc{\href{https://stackoverflow.com/help/badges/51/python?userid=562769}{Python} and it's eco-system}, including\\
+               & packaging, \href{https://medium.com/swlh/unit-testing-in-python-basics-21a9a57418a0}{pytest}, \href{https://towardsdatascience.com/pre-commit-hooks-you-must-know-ff247f5feb7e}{pre-commit}, \href{https://medium.com/analytics-vidhya/how-to-test-flask-applications-aef12ae5181c}{Flask},\\
+               & Numpy, \href{https://arxiv.org/pdf/1907.10121.pdf}{SciPy}, Pandas, Jupyter, OOP, \\
+               % & Functional Programming, Pydantic, \\
+               & \href{https://medium.com/analytics-vidhya/type-annotations-in-python-3-8-3b401384403d}{Type Annotations}, Pypika, \href{https://martin-thoma.com/rest/}{REST}, \dots\\ \\
+\end{tabular}
+
+%----------------------------------------------------------------------------------------
+%	COMMUNICATION SKILLS
+%----------------------------------------------------------------------------------------
+
+\section{Language Skills}
+
+\begin{tabular}{rl}
+\textsc{German}
+& mother tongue\\
+& \\
+\textsc{English}
+& Cambridge Certificate – C1\\
+& \\
+\end{tabular}\\[10pt]
+
+%----------------------------------------------------------------------------------------
+
+\end{minipage} % End right-hand side of the page
+%-----------------------------------------------------------------------------------------------------------------------------------------------------
+
+% Start the left-hand side of the page
+\begin{minipage}[t]{0.5\textwidth}
+\vspace{0pt} % Trick for alignment
+
+%----------------------------------------------------------------------------------------
+%	WORK EXPERIENCE
+%----------------------------------------------------------------------------------------
+
+\section{Work Experience}
+%----------------------------------------------------------------------------------------
+% WORK EXPERIENCE -2-
+
+{\raggedleft\textsc{2011}\par}
+
+{\raggedright\large Student research assistant at \textsc{ Institute of Toxicology and Genetics}, KIT\\
+\textit{participating in a university research project}\\[5pt]}
+
+\normalsize{In summer 2011 I worked on a
+research project at KIT. I have written bash scripts for file
+conversions and re-written a slow Mathematica script
+in a much faster Python version. It was my first contact with big data,
+clustering algorithms, data centers using Hadoop, C++, VTK, cmake}\\
+
+%----------------------------------------------------------------------------------------
+% WORK EXPERIENCE -3-
+
+{\raggedleft\textsc{2011 - 2012}\par}
+
+{\raggedright\large Building my own Startup\\
+\textit{MATHOS - a calendar app for schools}\\[5pt]}
+
+\normalsize{I have started to work as a freelancer at the beginning
+of 2011. I have developed an online-service which helped
+schools to coordinate their dates. I have sold this online service to
+two schools in bavaria and three other schools were interested.
+Unfortunately, the ministry of education of Bavaria
+released an application with similar functionality in
+2012. This was the reason why I decided to shut down my service.}\\
+
+%----------------------------------------------------------------------------------------
+% WORK EXPERIENCE -3-
+
+{\raggedleft\textsc{2010}\par}
+
+{\raggedright\large Thesis about the RSA cryptosystem\\
+\textit{Explaining the foundations of asymmetric cryptography}\\[5pt]}
+
+\normalsize{Understanding asymmetric cryptograph with the RSA algorithm was the
+first time I went down the rabbithole of university-level mathematics. I could
+combine my enthusiasm for computer science, algorithms and mathematics in this
+first academic work.}\hfill \href{http://www.martin-thoma.de/Facharbeit-Martin-Thoma-2.pdf}{$\rightarrow$ read more}\\
+%----------------------------------------------------------------------------------------
+
+
+{\raggedleft\textsc{2006 - 2011}\par}
+
+{\raggedright\large Algorithm Engineering and Ethical Hacking\\
+\textit{ProjectEuler and many more}\\[5pt]}
+
+\normalsize{I like solving logical, algorithmical or math
+puzzles and participated in competitions. It started with trying to break into
+systems where the creators purposely left a security hole such as a possible
+SQL injection. From those HackIt's, I continued to solve programming and
+algorithm engineering puzzles in 2006 and I still like them. This was the
+reason why I participated in a practical curse at KIT for preparation for ICPC.
+It was fun, but I found out that many people are much faster in producing C++
+code that passed the tests than I am. However, as I've been very successfull at
+the Federal Competition for Computer Science (``Bundeswettbewerb Informatik'')
+it seems as if I'm better in problem solving if I get more time to think about
+it.}\\
+
+%----------------------------------------------------------------------------------------
+\section{About me}
+I love learning new stuff and giving that knowledge to others, often in the
+form of blog posts. Besides my studies, I have built a machine learning
+students group called \textit{Machine Learning Karlsruhe}. In this
+group we organized regular \enquote{Paper Discussion Groups} in which we talked
+about papers about convolutional networks.\\
+I like playing board games, reading SciFi novels, to go hiking, bouldering, and climbing.
+
+\end{minipage} % End left-hand side of the page
+\hfill
+% Start the right-hand side of the page
+\begin{minipage}[t]{0.44\textwidth}
+\vspace{0pt} %trick for alignment
+
+%----------------------------------------------------------------------------------------
+%	AWARDS
+%----------------------------------------------------------------------------------------
+
+\section{Private Projects}
+
+
+
+\begin{tabular}{rl}
+%----------------------------------------------------------------------------------------
+09/2020  & \textbf{Flake8-simplify}\\
+& \textit{Automatic code simplification}\hfill \href{https://github.com/MartinThoma/flake8-simplify}{$\rightarrow$ read more}\\ \\
+
+%----------------------------------------------------------------------------------------
+02/2016  & \textbf{The WiLI benchmark dataset}\\
+& \textit{written language identification}\hfill \href{https://arxiv.org/abs/1801.07779}{$\rightarrow$ read more}\\ \\
+
+%----------------------------------------------------------------------------------------
+02/2016  & \textbf{A Survey of Semantic Segmentation}\\
+& \textit{writing a review paper about the work }\\
+& \textit{in the area}\hfill \href{https://arxiv.org/abs/1602.06541}{$\rightarrow$ read more}\\ \\
+
+%----------------------------------------------------------------------------------------
+01/2016  & \textbf{Creativity in Machine Learning}\\
+& \textit{a little project to help people understand}\\
+& \textit{my fascination about the topic}\hfill \href{https://arxiv.org/abs/1601.03642}{$\rightarrow$ read more}\\ \\
+
+%----------------------------------------------------------------------------------------
+05/2015  & \textbf{Semantic Segmentation with CNNs}\\
+& \textit{classifying street for self-driving cars}\\ \\
+
+%----------------------------------------------------------------------------------------
+11/2013  & \textbf{Book about Geometry and Topology}\\
+& \textit{writing an introduction to geometry and}\\
+& \textit{topology}\hfill \href{http://martin-thoma.com/geotopo/}{$\rightarrow$ read more}\\ \\
+
+%----------------------------------------------------------------------------------------
+06/2013	 & \textbf{Interpolation}\\
+& \textit{creating an interactive HTML5/JS-example}\\
+& \textit{for interpolation} \hfill \href{http://martin-thoma.com/polynomial-interpolation/}{$\rightarrow$ read more} \\\\
+
+%----------------------------------------------------------------------------------------
+06/2012	 & \textbf{Matrix multiplication}\\
+& \textit{examining algorithms and libraries for}\\
+& \textit{matrix multiplication} \hfill \href{http://martin-thoma.com/matrix-multiplication-python-java-cpp/}{$\rightarrow$ read more}\\\\
+
+%----------------------------------------------------------------------------------------
+since	 & \textbf{Blogging on martin-thoma.com}\\
+09/2011 & \textit{about Algorithms, the Web, University, \dots}\\ \\
+
+%----------------------------------------------------------------------------------------
+
+06/2011	 & \textbf{Community Chess}\\
+& \textit{This is a platform for programmers. They}\\
+& \textit{can use the API to create A.I.s that play}\\
+& \textit{chess agains each other. } \hfill \href{https://github.com/MartinThoma/community-chess}{$\rightarrow$ read more}\\\\
+\end{tabular}\\[10pt]
+
+%----------------------------------------------------------------------------------------
+%	COMPUTER SKILLS
+%----------------------------------------------------------------------------------------
+
+\section{Online Courses}
+
+\begin{tabular}{rll}
+09/2013     & \textbf{Artificial Intelligence} & Udacity\\
+         & \textbf{for Robotics}            &\\
+         & \textit{finished 10/2013}        &\\\\
+06/2013     & \textbf{Introduction to }        & Udacity\\
+         & \textbf{Artificial Intelligence} &\\
+         & \textit{finished 08/2013}        &\\\\
+05/2012     & \textbf{Algorithms I}            & Stanford\\
+         & \textit{finished 07/2012}        &\\\\
+06/2010     & \textbf{Introduction to Computer}& MIT\\
+         & \textbf{Science and Programming} &\\
+         & \textit{finished 09/2010}        &\\\\
+\end{tabular}\\[10pt]
+
+
+\section{Profiles}
+
+\begin{tabular}{ll}
+StackExchange  & \href{https://careers.stackoverflow.com/thoma}{careers.stackoverflow.com/thoma} \\
+arXiv  & \href{http://arxiv.org/a/thoma_m_1.html}{arxiv.org/a/thoma\_m\_1} \\
+LinkedIn  & \href{https://www.linkedin.com/in/martin-thoma}{linkedin.com/in/martin-thoma} \\
+\end{tabular}\\[10pt]
+
+%----------------------------------------------------------------------------------------
+
+\end{minipage} % End right-hand side of the page
+
+%\includepdf[pages=1-2]{zeugnis}
+
+\end{document}

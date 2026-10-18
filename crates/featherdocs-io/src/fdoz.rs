@@ -1,0 +1,962 @@
+//! O `.fdoz`: contêiner ZIP (contrato geral em `FORMATO.md`) com o documento em **Arrow**
+//! colunar, como o `.fshz` do FeatherSheet — nada de JSON.
+//!
+//! ```text
+//! data/documento.arrow   uma linha: título, autor, papel, margens, cabeçalho, rodapé,
+//!                        fundo e borda da página, numeração (formato e aplicativo nos metadados do esquema)
+//! data/blocos.arrow      um bloco por linha: tipo, conteúdo próprio (código, fórmula, imagem…) e atributos
+//! data/trechos.arrow     o texto formatado: um trecho por linha, apontando o bloco (e a célula, em tabela)
+//! data/tabelas.arrow     a forma das tabelas: quantas células tem cada linha
+//! data/estilos.arrow     os estilos de parágrafo com nome
+//! data/marcadores.arrow  os marcadores (nome → bloco)
+//! data/fontes.arrow      as fontes citadas (uma por linha; falta nos arquivos de antes dela)
+//! data/comentarios.arrow os comentários, e data/respostas.arrow as respostas deles
+//! assets/                as imagens, como arquivo (não como texto base64)
+//! ```
+//!
+//! O `.git/` embutido do contrato **ainda não entrou**. O `.fdoz` antigo (JSON, formato 1, só da
+//! fase de testes) não abre mais — o mesmo corte que o FeatherSheet fez com o `.oplz`.
+
+use std::collections::HashMap;
+use std::io::{Cursor, Read, Write};
+use std::sync::Arc;
+
+use arrow::array::{Array, ArrayRef, BooleanArray, Float32Array, Int8Array, RecordBatch, StringArray, UInt32Array, UInt64Array, UInt8Array};
+use arrow::datatypes::{Field, Schema};
+use arrow::ipc::reader::FileReader;
+use arrow::ipc::writer::FileWriter;
+use featherdocs_core::modelo::{Alinhamento, Atrib, Autor, Bloco, Comentario, Resposta, Revisao, TipoDeRevisao, EstiloDeCitacao, Fonte, TipoDeFonte, Celula, ConfigPagina, Conteudo, Documento, MesclagemTabela, Estilo, Estilos, Extras, Faixas, Fmt, Lista, Marca, Marcador, Meta, Numeracao, NumeracaoDeLinhas, Trecho, Vertical};
+use zip::write::SimpleFileOptions;
+
+use crate::base64;
+
+/// A versão do formato: 2 = Arrow (1 era o JSON da fase de testes).
+const VERSAO: u32 = 2;
+const APLICATIVO: &str = "FeatherDocs";
+
+fn erro(e: &dyn std::fmt::Display) -> String {
+    format!("Não consegui gravar o .fdoz: {e}")
+}
+
+// ---------------------------------------------------------------------------
+// Códigos dos enums (o que vai para as colunas `u8`)
+// ---------------------------------------------------------------------------
+
+const ALINHAMENTOS: [Alinhamento; 4] = [Alinhamento::Esquerda, Alinhamento::Centro, Alinhamento::Direita, Alinhamento::Justificado];
+const LISTAS: [Lista; 8] = [Lista::Padrao, Lista::Circulo, Lista::Quadrado, Lista::Seta, Lista::Tarefa, Lista::Numerica, Lista::Alfabetica, Lista::Romana];
+const VERTICAIS: [Vertical; 3] = [Vertical::Topo, Vertical::Centro, Vertical::Base];
+const LINHAS_NUMERADAS: [NumeracaoDeLinhas; 3] = [NumeracaoDeLinhas::Nenhuma, NumeracaoDeLinhas::Continua, NumeracaoDeLinhas::PorPagina];
+const NUMERACOES: [Numeracao; 3] = [Numeracao::Nenhuma, Numeracao::Decimal, Numeracao::Capitulo];
+const ESTILOS_DE_CITACAO: [EstiloDeCitacao; 5] = [EstiloDeCitacao::Abnt, EstiloDeCitacao::Apa, EstiloDeCitacao::Vancouver, EstiloDeCitacao::Ieee, EstiloDeCitacao::Chicago];
+const TIPOS_DE_FONTE: [TipoDeFonte; 7] = [TipoDeFonte::Livro, TipoDeFonte::Capitulo, TipoDeFonte::Artigo, TipoDeFonte::Site, TipoDeFonte::Tese, TipoDeFonte::Relatorio, TipoDeFonte::Outro];
+/// Separa os autores (e, dentro de um autor, o sobrenome do nome) na coluna `autores`.
+const ENTRE_AUTORES: char = '\u{1e}';
+const ENTRE_NOMES: char = '\u{1f}';
+
+fn codigo_de<T: PartialEq>(tabela: &[T], v: &T) -> u8 {
+    tabela.iter().position(|x| x == v).unwrap_or(0) as u8
+}
+
+fn valor_de<T: Copy>(tabela: &[T], c: u8) -> T {
+    tabela.get(usize::from(c)).copied().unwrap_or(tabela[0])
+}
+
+/// O tipo do bloco na coluna `tipo`.
+fn tipo_do_bloco(c: &Conteudo) -> u8 {
+    match c {
+        Conteudo::Titulo { .. } => 0,
+        Conteudo::Paragrafo { .. } => 1,
+        Conteudo::Item { .. } => 2,
+        Conteudo::Citacao { .. } => 3,
+        Conteudo::Codigo { .. } => 4,
+        Conteudo::Tabela { .. } => 5,
+        Conteudo::Imagem { .. } => 6,
+        Conteudo::Equacao { .. } => 7,
+        Conteudo::Sumario { .. } => 8,
+        Conteudo::Regua => 9,
+        Conteudo::QuebraDePagina => 10,
+        Conteudo::Bibliografia { .. } => 11,
+        Conteudo::IndiceRemissivo => 12,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tabelas Arrow: gravar e ler
+// ---------------------------------------------------------------------------
+
+/// Uma tabela Arrow (IPC, formato de arquivo) com as colunas dadas.
+fn tabela(colunas: Vec<(&str, ArrayRef)>, metadados: HashMap<String, String>) -> Result<Vec<u8>, String> {
+    let campos: Vec<Field> = colunas.iter().map(|(n, a)| Field::new(*n, a.data_type().clone(), true)).collect();
+    let esquema = Arc::new(Schema::new_with_metadata(campos, metadados));
+    let lote = RecordBatch::try_new(esquema.clone(), colunas.into_iter().map(|(_, a)| a).collect()).map_err(|e| erro(&e))?;
+    let mut bytes = Vec::new();
+    let mut w = FileWriter::try_new(&mut bytes, &esquema).map_err(|e| erro(&e))?;
+    w.write(&lote).map_err(|e| erro(&e))?;
+    w.finish().map_err(|e| erro(&e))?;
+    drop(w);
+    Ok(bytes)
+}
+
+/// Uma tabela lida: as colunas pelo nome e os metadados do esquema.
+struct Lida {
+    lote: RecordBatch,
+    nome: &'static str,
+}
+
+impl Lida {
+    fn de(bytes: &[u8], nome: &'static str) -> Result<Self, String> {
+        let leitor = FileReader::try_new(Cursor::new(bytes), None).map_err(|e| format!("{nome} ilegível: {e}"))?;
+        let esquema = leitor.schema();
+        let lotes: Vec<RecordBatch> = leitor.collect::<Result<_, _>>().map_err(|e| format!("{nome} ilegível: {e}"))?;
+        let lote = arrow::compute::concat_batches(&esquema, &lotes).map_err(|e| format!("{nome} ilegível: {e}"))?;
+        Ok(Self { lote, nome })
+    }
+
+    fn linhas(&self) -> usize {
+        self.lote.num_rows()
+    }
+
+    fn meta(&self, chave: &str) -> Option<&str> {
+        self.lote.schema_ref().metadata().get(chave).map(String::as_str)
+    }
+
+    fn col<T: 'static>(&self, campo: &str) -> Result<&T, String> {
+        self.lote.column_by_name(campo).and_then(|c| c.as_any().downcast_ref::<T>()).ok_or_else(|| format!("{}: falta a coluna \"{campo}\".", self.nome))
+    }
+}
+
+/// Valor de uma coluna que aceita nulo.
+fn opcional<A: Array, T>(a: &A, i: usize, f: impl Fn(&A, usize) -> T) -> Option<T> {
+    (!a.is_null(i)).then(|| f(a, i))
+}
+
+// ---------------------------------------------------------------------------
+// Gravar
+// ---------------------------------------------------------------------------
+
+/// Grava o documento num `.fdoz`.
+pub fn gravar(doc: &Documento) -> Result<Vec<u8>, String> {
+    let mut imagens = Vec::new();
+    let mut partes: Vec<(String, Vec<u8>)> = vec![
+        ("data/documento.arrow".into(), documento_arrow(doc)?),
+        ("data/blocos.arrow".into(), blocos_arrow(&doc.blocos, &mut imagens)?),
+        ("data/trechos.arrow".into(), trechos_arrow(&doc.blocos)?),
+        ("data/tabelas.arrow".into(), tabelas_arrow(&doc.blocos)?),
+        ("data/estilos.arrow".into(), estilos_arrow(&doc.estilos)?),
+        ("data/marcadores.arrow".into(), marcadores_arrow(&doc.marcadores)?),
+        ("data/fontes.arrow".into(), fontes_arrow(&doc.bibliografia.fontes)?),
+        ("data/comentarios.arrow".into(), comentarios_arrow(&doc.comentarios)?),
+        ("data/respostas.arrow".into(), respostas_arrow(&doc.comentarios)?),
+    ];
+    partes.extend(imagens);
+    let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    let opcoes = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    for (nome, conteudo) in partes {
+        zip.start_file(nome, opcoes).map_err(|e| erro(&e))?;
+        zip.write_all(&conteudo).map_err(|e| erro(&e))?;
+    }
+    Ok(zip.finish().map_err(|e| erro(&e))?.into_inner())
+}
+
+fn texto(v: &str) -> ArrayRef {
+    Arc::new(StringArray::from(vec![v]))
+}
+fn u32_(v: u32) -> ArrayRef {
+    Arc::new(UInt32Array::from(vec![v]))
+}
+fn f32_(v: f32) -> ArrayRef {
+    Arc::new(Float32Array::from(vec![v]))
+}
+fn u8_(v: u8) -> ArrayRef {
+    Arc::new(UInt8Array::from(vec![v]))
+}
+
+fn documento_arrow(doc: &Documento) -> Result<Vec<u8>, String> {
+    let (p, x) = (&doc.pagina, &doc.extras);
+    let meta = HashMap::from([("aplicativo".to_string(), APLICATIVO.to_string()), ("formato".to_string(), VERSAO.to_string())]);
+    tabela(
+        vec![
+            ("titulo", texto(&doc.meta.titulo)),
+            ("autor", texto(&doc.meta.autor)),
+            ("largura", f32_(p.largura)),
+            ("altura", f32_(p.altura)),
+            ("margem_sup", f32_(p.margem_sup)),
+            ("margem_dir", f32_(p.margem_dir)),
+            ("margem_inf", f32_(p.margem_inf)),
+            ("margem_esq", f32_(p.margem_esq)),
+            ("proximo_id", Arc::new(UInt64Array::from(vec![doc.proximo_id]))),
+            ("cabecalho_esq", texto(&x.cabecalho.esquerda)),
+            ("cabecalho_centro", texto(&x.cabecalho.centro)),
+            ("cabecalho_dir", texto(&x.cabecalho.direita)),
+            ("rodape_esq", texto(&x.rodape.esquerda)),
+            ("rodape_centro", texto(&x.rodape.centro)),
+            ("rodape_dir", texto(&x.rodape.direita)),
+            ("primeira_diferente", Arc::new(BooleanArray::from(vec![x.primeira_diferente]))),
+            ("cor_pagina", u32_(x.cor_pagina)),
+            ("marca", texto(&x.marca)),
+            ("marca_cor", u32_(x.marca_cor)),
+            ("borda_cor", u32_(x.borda_cor)),
+            ("borda_espessura", f32_(x.borda_espessura)),
+            ("borda_distancia", f32_(x.borda_distancia)),
+            ("vertical", u8_(codigo_de(&VERTICAIS, &x.vertical))),
+            ("numerar_linhas", u8_(codigo_de(&LINHAS_NUMERADAS, &x.numerar_linhas))),
+            ("numeracao", u8_(codigo_de(&NUMERACOES, &doc.estilos.numeracao))),
+            ("formato_notas", u8_(x.formato_notas)),
+            ("formato_notas_fim", u8_(x.formato_notas_fim)),
+            ("estilo_citacao", u8_(codigo_de(&ESTILOS_DE_CITACAO, &doc.bibliografia.estilo))),
+            ("controlar_alteracoes", Arc::new(BooleanArray::from(vec![x.controlar_alteracoes]))),
+            ("protegido", Arc::new(BooleanArray::from(vec![x.protegido]))),
+        ],
+        meta,
+    )
+}
+
+/// As colunas da tabela de blocos, uma `Vec` por coluna.
+#[derive(Default)]
+struct ColunasDeBloco {
+    id: Vec<u64>,
+    tipo: Vec<u8>,
+    nivel: Vec<u8>,
+    ordenado: Vec<bool>,
+    fonte: Vec<Option<String>>,
+    linguagem: Vec<Option<String>>,
+    largura: Vec<f32>,
+    altura: Vec<f32>,
+    /// Cabeçalho da tabela; no sumário, "sem números".
+    marca_a: Vec<bool>,
+    /// No sumário, "sem pontilhado".
+    marca_b: Vec<bool>,
+    /// No sumário, 0 = títulos, 1 = figuras, 2 = tabelas.
+    lista_sumario: Vec<u8>,
+    mesclagens: Vec<String>,
+    a: ColunasDeAtrib,
+}
+
+#[derive(Default)]
+struct ColunasDeAtrib {
+    alinhamento: Vec<u8>,
+    entrelinha: Vec<f32>,
+    antes: Vec<Option<f32>>,
+    depois: Vec<Option<f32>>,
+    fundo: Vec<u32>,
+    borda: Vec<u8>,
+    cor_borda: Vec<u32>,
+    lista: Vec<u8>,
+    marcado: Vec<bool>,
+    reiniciar: Vec<bool>,
+    recuo_esq: Vec<f32>,
+    recuo_dir: Vec<f32>,
+    primeira: Vec<f32>,
+    estilo: Vec<u32>,
+    sem_numero: Vec<bool>,
+    legenda: Vec<u8>,
+    cor_marcador: Vec<u32>,
+}
+
+impl ColunasDeAtrib {
+    fn por(&mut self, a: &Atrib) {
+        self.alinhamento.push(codigo_de(&ALINHAMENTOS, &a.alinhamento));
+        self.entrelinha.push(a.entrelinha);
+        self.antes.push(a.antes);
+        self.depois.push(a.depois);
+        self.fundo.push(a.fundo);
+        self.borda.push(a.borda);
+        self.cor_borda.push(a.cor_borda);
+        self.lista.push(codigo_de(&LISTAS, &a.lista));
+        self.marcado.push(a.marcado);
+        self.reiniciar.push(a.reiniciar);
+        self.recuo_esq.push(a.recuo_esq);
+        self.recuo_dir.push(a.recuo_dir);
+        self.primeira.push(a.primeira);
+        self.estilo.push(a.estilo);
+        self.sem_numero.push(a.sem_numero);
+        self.legenda.push(a.legenda);
+        self.cor_marcador.push(a.cor_marcador);
+    }
+
+    fn colunas(self) -> Vec<(&'static str, ArrayRef)> {
+        vec![
+            ("alinhamento", Arc::new(UInt8Array::from(self.alinhamento))),
+            ("entrelinha", Arc::new(Float32Array::from(self.entrelinha))),
+            ("antes", Arc::new(Float32Array::from(self.antes))),
+            ("depois", Arc::new(Float32Array::from(self.depois))),
+            ("fundo", Arc::new(UInt32Array::from(self.fundo))),
+            ("borda", Arc::new(UInt8Array::from(self.borda))),
+            ("cor_borda", Arc::new(UInt32Array::from(self.cor_borda))),
+            ("lista", Arc::new(UInt8Array::from(self.lista))),
+            ("marcado", Arc::new(BooleanArray::from(self.marcado))),
+            ("reiniciar", Arc::new(BooleanArray::from(self.reiniciar))),
+            ("recuo_esq", Arc::new(Float32Array::from(self.recuo_esq))),
+            ("recuo_dir", Arc::new(Float32Array::from(self.recuo_dir))),
+            ("primeira", Arc::new(Float32Array::from(self.primeira))),
+            ("estilo", Arc::new(UInt32Array::from(self.estilo))),
+            ("sem_numero", Arc::new(BooleanArray::from(self.sem_numero))),
+            ("legenda", Arc::new(UInt8Array::from(self.legenda))),
+            ("cor_marcador", Arc::new(UInt32Array::from(self.cor_marcador))),
+        ]
+    }
+}
+
+/// A extensão de arquivo de um tipo de imagem.
+fn extensao_da_imagem(tipo: &str) -> &'static str {
+    match tipo {
+        "image/jpeg" | "image/jpg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/svg+xml" => "svg",
+        "image/bmp" => "bmp",
+        _ => "png",
+    }
+}
+
+fn tipo_da_imagem(nome: &str) -> &'static str {
+    match nome.rsplit('.').next().unwrap_or("") {
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "bmp" => "image/bmp",
+        _ => "image/png",
+    }
+}
+
+impl ColunasDeBloco {
+    /// A imagem embutida (`data:`) vai para `assets/` como arquivo; a coluna guarda o caminho.
+    fn origem(origem: &str, imagens: &mut Vec<(String, Vec<u8>)>) -> String {
+        match base64::de_data_url(origem) {
+            Some((tipo, bytes)) => {
+                let nome = format!("assets/imagem-{}.{}", imagens.len() + 1, extensao_da_imagem(&tipo));
+                imagens.push((nome.clone(), bytes));
+                nome
+            }
+            None => origem.to_string(),
+        }
+    }
+
+    fn por(&mut self, b: &Bloco, imagens: &mut Vec<(String, Vec<u8>)>) {
+        let (mut nivel, mut ordenado, mut fonte, mut linguagem) = (0, false, None, None);
+        let (mut largura, mut altura, mut marca_a, mut marca_b, mut lista_sumario) = (0.0, 0.0, false, false, 0);
+        match &b.conteudo {
+            Conteudo::Titulo { nivel: n, .. } => nivel = *n,
+            Conteudo::Item { ordenado: o, nivel: n, .. } => (ordenado, nivel) = (*o, *n),
+            Conteudo::Codigo { linguagem: l, codigo } => (fonte, linguagem) = (Some(codigo.clone()), Some(l.clone())),
+            Conteudo::Tabela { cabecalho, .. } => marca_a = *cabecalho,
+            Conteudo::Imagem { origem, largura: w, altura: h, .. } => (fonte, largura, altura) = (Some(Self::origem(origem, imagens)), *w, *h),
+            Conteudo::Equacao { latex } => fonte = Some(latex.clone()),
+            Conteudo::Sumario { niveis, sem_numeros, sem_pontilhado, lista } => (nivel, marca_a, marca_b, lista_sumario) = (*niveis, *sem_numeros, *sem_pontilhado, *lista),
+            Conteudo::Bibliografia { todas } => marca_a = *todas,
+            _ => {}
+        }
+        self.id.push(b.id);
+        self.tipo.push(tipo_do_bloco(&b.conteudo));
+        self.nivel.push(nivel);
+        self.ordenado.push(ordenado);
+        self.fonte.push(fonte);
+        self.linguagem.push(linguagem);
+        self.largura.push(largura);
+        self.altura.push(altura);
+        self.marca_a.push(marca_a);
+        self.marca_b.push(marca_b);
+        self.lista_sumario.push(lista_sumario);
+        self.mesclagens.push(b.mesclagens.iter()
+            .map(|m| format!("{},{},{}", m.linha, m.coluna, m.colunas))
+            .collect::<Vec<_>>().join(";"));
+        self.a.por(&b.atrib);
+    }
+}
+
+fn blocos_arrow(blocos: &[Bloco], imagens: &mut Vec<(String, Vec<u8>)>) -> Result<Vec<u8>, String> {
+    let mut c = ColunasDeBloco::default();
+    for b in blocos {
+        c.por(b, imagens);
+    }
+    let mut colunas: Vec<(&str, ArrayRef)> = vec![
+        ("id", Arc::new(UInt64Array::from(c.id))),
+        ("tipo", Arc::new(UInt8Array::from(c.tipo))),
+        ("nivel", Arc::new(UInt8Array::from(c.nivel))),
+        ("ordenado", Arc::new(BooleanArray::from(c.ordenado))),
+        ("fonte", Arc::new(StringArray::from(c.fonte))),
+        ("linguagem", Arc::new(StringArray::from(c.linguagem))),
+        ("largura", Arc::new(Float32Array::from(c.largura))),
+        ("altura", Arc::new(Float32Array::from(c.altura))),
+        ("marca_a", Arc::new(BooleanArray::from(c.marca_a))),
+        ("marca_b", Arc::new(BooleanArray::from(c.marca_b))),
+        ("lista_sumario", Arc::new(UInt8Array::from(c.lista_sumario))),
+        ("mesclagens", Arc::new(StringArray::from(c.mesclagens))),
+    ];
+    colunas.extend(c.a.colunas());
+    tabela(colunas, HashMap::new())
+}
+
+/// Onde o trecho mora: no texto do bloco, na legenda da imagem ou numa célula de tabela.
+const PARTE_TEXTO: u8 = 0;
+const PARTE_LEGENDA: u8 = 1;
+const PARTE_CELULA: u8 = 2;
+/// O texto de uma nota: a linha `dono` é a da chamada (o trecho com a marca).
+const PARTE_NOTA: u8 = 3;
+
+/// O tipo do objeto preso ao trecho (coluna `marca`): 0 = nenhum.
+fn tipo_da_marca(m: &Marca) -> u8 {
+    match m {
+        Marca::Nota { .. } => 1,
+        Marca::Citacao { .. } => 2,
+        Marca::Indice { .. } => 3,
+        Marca::Campo { .. } => 4,
+        Marca::Comentario { .. } => 5,
+    }
+}
+
+/// Separa as chaves de uma citação dentro da coluna de texto.
+const SEPARADOR_DE_CHAVES: char = '\u{1f}';
+
+/// As colunas `marca_a`, `marca_b` e `marca_fim` de cada tipo de objeto.
+fn partes_da_marca(m: &Marca) -> (Option<String>, Option<String>, bool) {
+    match m {
+        Marca::Nota { fim, .. } => (None, None, *fim),
+        Marca::Citacao { chaves, pagina } => (Some(chaves.join(&SEPARADOR_DE_CHAVES.to_string())), Some(pagina.clone()), false),
+        Marca::Indice { termo, sub } => (Some(termo.clone()), Some(sub.clone()), false),
+        Marca::Campo { campo } => (Some(campo.clone()), None, false),
+        Marca::Comentario { id, fim } => (Some(id.to_string()), None, *fim),
+    }
+}
+
+fn marca_das_partes(tipo: u8, a: String, b: String, fim: bool) -> Option<Marca> {
+    Some(match tipo {
+        1 => Marca::Nota { fim, texto: Vec::new() },
+        2 => Marca::Citacao { chaves: a.split(SEPARADOR_DE_CHAVES).filter(|c| !c.is_empty()).map(str::to_string).collect(), pagina: b },
+        3 => Marca::Indice { termo: a, sub: b },
+        4 => Marca::Campo { campo: a },
+        5 => Marca::Comentario { id: a.parse().unwrap_or(0), fim },
+        _ => return None,
+    })
+}
+
+#[derive(Default)]
+struct ColunasDeTrecho {
+    bloco: Vec<u32>,
+    parte: Vec<u8>,
+    linha: Vec<u32>,
+    coluna: Vec<u32>,
+    texto: Vec<String>,
+    estilo: Vec<u8>,
+    link: Vec<Option<String>>,
+    tamanho: Vec<f32>,
+    cor: Vec<u32>,
+    realce: Vec<u32>,
+    posicao: Vec<i8>,
+    marca: Vec<u8>,
+    marca_a: Vec<Option<String>>,
+    marca_b: Vec<Option<String>>,
+    marca_fim: Vec<bool>,
+    dono: Vec<Option<u32>>,
+    /// Sugestão: 0 = nenhuma, 1 = inserção, 2 = remoção; e quem, e quando.
+    rev: Vec<u8>,
+    rev_autor: Vec<Option<String>>,
+    rev_quando: Vec<Option<String>>,
+}
+
+impl ColunasDeTrecho {
+    fn por(&mut self, bloco: usize, parte: u8, (linha, coluna): (u32, u32), ts: &[Trecho]) {
+        self.por_com_dono(bloco, parte, (linha, coluna), ts, None);
+    }
+
+    fn por_com_dono(&mut self, bloco: usize, parte: u8, (linha, coluna): (u32, u32), ts: &[Trecho], dono: Option<u32>) {
+        for t in ts {
+            let aqui = self.texto.len() as u32;
+            self.bloco.push(bloco as u32);
+            self.parte.push(parte);
+            self.linha.push(linha);
+            self.coluna.push(coluna);
+            self.texto.push(t.texto.clone());
+            self.estilo.push(t.estilo);
+            self.link.push(t.link.clone());
+            self.tamanho.push(t.fmt.tamanho);
+            self.cor.push(t.fmt.cor);
+            self.realce.push(t.fmt.realce);
+            self.posicao.push(t.fmt.posicao);
+            self.dono.push(dono);
+            let r = t.rev.as_deref();
+            self.rev.push(r.map_or(0, |r| if r.tipo == TipoDeRevisao::Insercao { 1 } else { 2 }));
+            self.rev_autor.push(r.map(|r| r.autor.clone()));
+            self.rev_quando.push(r.map(|r| r.quando.clone()));
+            let Some(m) = t.marca.as_deref() else {
+                self.marca.push(0);
+                self.marca_a.push(None);
+                self.marca_b.push(None);
+                self.marca_fim.push(false);
+                continue;
+            };
+            let (a, b, fim) = partes_da_marca(m);
+            self.marca.push(tipo_da_marca(m));
+            self.marca_a.push(a);
+            self.marca_b.push(b);
+            self.marca_fim.push(fim);
+            if let Marca::Nota { texto, .. } = m {
+                self.por_com_dono(bloco, PARTE_NOTA, (linha, coluna), texto, Some(aqui));
+            }
+        }
+    }
+}
+
+fn trechos_arrow(blocos: &[Bloco]) -> Result<Vec<u8>, String> {
+    let mut c = ColunasDeTrecho::default();
+    for (i, b) in blocos.iter().enumerate() {
+        match &b.conteudo {
+            Conteudo::Titulo { texto, .. } | Conteudo::Paragrafo { texto } | Conteudo::Item { texto, .. } | Conteudo::Citacao { texto } => c.por(i, PARTE_TEXTO, (0, 0), texto),
+            Conteudo::Imagem { legenda, .. } => c.por(i, PARTE_LEGENDA, (0, 0), legenda),
+            Conteudo::Tabela { linhas, .. } => {
+                for (l, linha) in linhas.iter().enumerate() {
+                    for (k, celula) in linha.iter().enumerate() {
+                        c.por(i, PARTE_CELULA, (l as u32, k as u32), celula);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    tabela(
+        vec![
+            ("bloco", Arc::new(UInt32Array::from(c.bloco))),
+            ("parte", Arc::new(UInt8Array::from(c.parte))),
+            ("linha", Arc::new(UInt32Array::from(c.linha))),
+            ("coluna", Arc::new(UInt32Array::from(c.coluna))),
+            ("texto", Arc::new(StringArray::from(c.texto))),
+            ("estilo", Arc::new(UInt8Array::from(c.estilo))),
+            ("link", Arc::new(StringArray::from(c.link))),
+            ("tamanho", Arc::new(Float32Array::from(c.tamanho))),
+            ("cor", Arc::new(UInt32Array::from(c.cor))),
+            ("realce", Arc::new(UInt32Array::from(c.realce))),
+            ("posicao", Arc::new(Int8Array::from(c.posicao))),
+            ("marca", Arc::new(UInt8Array::from(c.marca))),
+            ("marca_a", Arc::new(StringArray::from(c.marca_a))),
+            ("marca_b", Arc::new(StringArray::from(c.marca_b))),
+            ("marca_fim", Arc::new(BooleanArray::from(c.marca_fim))),
+            ("dono", Arc::new(UInt32Array::from(c.dono))),
+            ("rev", Arc::new(UInt8Array::from(c.rev))),
+            ("rev_autor", Arc::new(StringArray::from(c.rev_autor))),
+            ("rev_quando", Arc::new(StringArray::from(c.rev_quando))),
+        ],
+        HashMap::new(),
+    )
+}
+
+/// A forma de cada tabela: uma linha por linha da tabela, com quantas células ela tem
+/// (célula vazia não tem trecho, então a forma não sai dos trechos).
+fn tabelas_arrow(blocos: &[Bloco]) -> Result<Vec<u8>, String> {
+    let (mut bloco, mut linha, mut celulas) = (Vec::new(), Vec::new(), Vec::new());
+    for (i, b) in blocos.iter().enumerate() {
+        if let Conteudo::Tabela { linhas, .. } = &b.conteudo {
+            for (l, cels) in linhas.iter().enumerate() {
+                bloco.push(i as u32);
+                linha.push(l as u32);
+                celulas.push(cels.len() as u32);
+            }
+        }
+    }
+    tabela(
+        vec![("bloco", Arc::new(UInt32Array::from(bloco))), ("linha", Arc::new(UInt32Array::from(linha))), ("celulas", Arc::new(UInt32Array::from(celulas)))],
+        HashMap::new(),
+    )
+}
+
+fn estilos_arrow(e: &Estilos) -> Result<Vec<u8>, String> {
+    let l = &e.lista;
+    tabela(
+        vec![
+            ("id", Arc::new(UInt32Array::from(l.iter().map(|x| x.id).collect::<Vec<_>>()))),
+            ("nome", Arc::new(StringArray::from(l.iter().map(|x| x.nome.as_str()).collect::<Vec<_>>()))),
+            ("base", Arc::new(UInt8Array::from(l.iter().map(|x| x.base).collect::<Vec<_>>()))),
+            ("bits", Arc::new(UInt8Array::from(l.iter().map(|x| x.bits).collect::<Vec<_>>()))),
+            ("tamanho", Arc::new(Float32Array::from(l.iter().map(|x| x.tamanho).collect::<Vec<_>>()))),
+            ("cor", Arc::new(UInt32Array::from(l.iter().map(|x| x.cor).collect::<Vec<_>>()))),
+            ("alinhamento", Arc::new(UInt8Array::from(l.iter().map(|x| codigo_de(&ALINHAMENTOS, &x.alinhamento)).collect::<Vec<_>>()))),
+            ("antes", Arc::new(Float32Array::from(l.iter().map(|x| x.antes).collect::<Vec<_>>()))),
+            ("depois", Arc::new(Float32Array::from(l.iter().map(|x| x.depois).collect::<Vec<_>>()))),
+            ("entrelinha", Arc::new(Float32Array::from(l.iter().map(|x| x.entrelinha).collect::<Vec<_>>()))),
+        ],
+        HashMap::new(),
+    )
+}
+
+fn marcadores_arrow(m: &[Marcador]) -> Result<Vec<u8>, String> {
+    tabela(
+        vec![
+            ("nome", Arc::new(StringArray::from(m.iter().map(|x| x.nome.as_str()).collect::<Vec<_>>()))),
+            ("bloco", Arc::new(UInt64Array::from(m.iter().map(|x| x.bloco).collect::<Vec<_>>()))),
+        ],
+        HashMap::new(),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Ler
+// ---------------------------------------------------------------------------
+
+fn ler_parte(zip: &mut zip::ZipArchive<Cursor<&[u8]>>, nome: &str) -> Result<Vec<u8>, String> {
+    let mut f = zip.by_name(nome).map_err(|_| format!("O .fdoz está incompleto: falta \"{nome}\"."))?;
+    let mut v = Vec::new();
+    f.read_to_end(&mut v).map_err(|e| format!("Não consegui ler \"{nome}\" do .fdoz: {e}"))?;
+    Ok(v)
+}
+
+/// Lê um `.fdoz`.
+pub fn ler(bytes: &[u8]) -> Result<Documento, String> {
+    let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| format!("Isto não é um .fdoz válido: {e}"))?;
+    if zip.by_name("manifest.json").is_ok() {
+        return Err("Este .fdoz é do formato antigo (JSON, da fase de testes), que não abre mais.".into());
+    }
+    let mut parte = |nome: &'static str| ler_parte(&mut zip, &format!("data/{nome}.arrow")).and_then(|b| Lida::de(&b, nome));
+    let documento = parte("documento")?;
+    let formato: u32 = documento.meta("formato").and_then(|v| v.parse().ok()).unwrap_or(0);
+    if formato > VERSAO {
+        return Err(format!("Este .fdoz é da versão {formato} do formato; este FeatherDocs entende até a {VERSAO}. Atualize o aplicativo."));
+    }
+    let (blocos, trechos, tabelas, estilos, marcadores) = (parte("blocos")?, parte("trechos")?, parte("tabelas")?, parte("estilos")?, parte("marcadores")?);
+    let mut doc = ler_documento(&documento)?;
+    doc.estilos.lista = ler_estilos(&estilos)?;
+    doc.marcadores = ler_marcadores(&marcadores)?;
+    if let Ok(b) = ler_parte(&mut zip, "data/fontes.arrow") {
+        doc.bibliografia.fontes = ler_fontes(&Lida::de(&b, "fontes")?)?;
+    }
+    if let Ok(b) = ler_parte(&mut zip, "data/comentarios.arrow") {
+        let respostas = ler_parte(&mut zip, "data/respostas.arrow").ok().map(|r| Lida::de(&r, "respostas")).transpose()?;
+        doc.comentarios = ler_comentarios(&Lida::de(&b, "comentarios")?, respostas.as_ref())?;
+    }
+    doc.blocos = ler_blocos(&blocos)?;
+    encher_trechos(&mut doc.blocos, &trechos, &tabelas)?;
+    // A forma da tabela só fica disponível após encher_trechos. Recusar
+    // arquivos hostis que esconderiam texto, ultrapassariam limites ou
+    // conteriam mesclagens sobrepostas antes de iniciar a composição.
+    for bloco in &doc.blocos {
+        if bloco.mesclagens.is_empty() {
+            continue;
+        }
+        let Conteudo::Tabela { linhas, .. } = &bloco.conteudo else {
+            return Err("Mesclagens só são válidas em tabelas.".into());
+        };
+        let colunas = linhas.first().map_or(0, Vec::len);
+        let mut ocupadas = std::collections::HashSet::new();
+        if linhas.len() > 200 || colunas > 30
+            || linhas.iter().any(|l| l.len() != colunas)
+            || bloco.mesclagens.len() > 3000 {
+            return Err("Mesclagens inválidas em tabela FDOZ.".into());
+        }
+        for m in &bloco.mesclagens {
+            if m.colunas < 2 || m.linha >= linhas.len()
+                || m.coluna.checked_add(m.colunas).map_or(true, |fim| fim > colunas) {
+                return Err("Mesclagem fora dos limites em FDOZ.".into());
+            }
+            for coluna in m.coluna..m.coluna + m.colunas {
+                if !ocupadas.insert((m.linha, coluna))
+                    || (coluna > m.coluna && !linhas[m.linha][coluna].is_empty()) {
+                    return Err("Mesclagem sobreposta ou destrutiva em FDOZ.".into());
+                }
+            }
+        }
+    }
+    for b in &mut doc.blocos {
+        if let Conteudo::Imagem { origem, .. } = &mut b.conteudo {
+            if origem.starts_with("assets/") {
+                let dados = ler_parte(&mut zip, origem)?;
+                *origem = base64::para_data_url(tipo_da_imagem(origem), &dados);
+            }
+        }
+    }
+    doc.acertar_ids();
+    Ok(doc)
+}
+
+fn ler_documento(t: &Lida) -> Result<Documento, String> {
+    if t.linhas() != 1 {
+        return Err("documento.arrow tem que ter uma linha.".into());
+    }
+    let s = |c: &str| t.col::<StringArray>(c).map(|a| a.value(0).to_string());
+    let f = |c: &str| t.col::<Float32Array>(c).map(|a| a.value(0));
+    let u = |c: &str| t.col::<UInt32Array>(c).map(|a| a.value(0));
+    let b8 = |c: &str| t.col::<UInt8Array>(c).map(|a| a.value(0));
+    let pagina = ConfigPagina { largura: f("largura")?, altura: f("altura")?, margem_sup: f("margem_sup")?, margem_dir: f("margem_dir")?, margem_inf: f("margem_inf")?, margem_esq: f("margem_esq")? };
+    let extras = Extras {
+        cabecalho: Faixas { esquerda: s("cabecalho_esq")?, centro: s("cabecalho_centro")?, direita: s("cabecalho_dir")? },
+        rodape: Faixas { esquerda: s("rodape_esq")?, centro: s("rodape_centro")?, direita: s("rodape_dir")? },
+        primeira_diferente: t.col::<BooleanArray>("primeira_diferente")?.value(0),
+        cor_pagina: u("cor_pagina")?,
+        marca: s("marca")?,
+        marca_cor: u("marca_cor")?,
+        borda_cor: u("borda_cor")?,
+        borda_espessura: f("borda_espessura")?,
+        borda_distancia: f("borda_distancia")?,
+        vertical: valor_de(&VERTICAIS, b8("vertical")?),
+        numerar_linhas: valor_de(&LINHAS_NUMERADAS, b8("numerar_linhas")?),
+        // As colunas de depois da primeira versão do formato 2 podem faltar.
+        formato_notas: b8("formato_notas").unwrap_or(0),
+        formato_notas_fim: b8("formato_notas_fim").unwrap_or(2),
+        controlar_alteracoes: t.col::<BooleanArray>("controlar_alteracoes").is_ok_and(|a| a.value(0)),
+        protegido: t.col::<BooleanArray>("protegido").is_ok_and(|a| a.value(0)),
+    };
+    let mut doc = Documento::vazio();
+    doc.meta = Meta { titulo: s("titulo")?, autor: s("autor")? };
+    doc.pagina = pagina;
+    doc.extras = extras;
+    doc.estilos.numeracao = valor_de(&NUMERACOES, b8("numeracao")?);
+    doc.bibliografia.estilo = valor_de(&ESTILOS_DE_CITACAO, b8("estilo_citacao").unwrap_or(0));
+    doc.proximo_id = t.col::<UInt64Array>("proximo_id")?.value(0);
+    Ok(doc)
+}
+
+fn ler_atrib(t: &Lida, i: usize) -> Result<Atrib, String> {
+    let f = |c: &str| t.col::<Float32Array>(c).map(|a| a.value(i));
+    let fo = |c: &str| t.col::<Float32Array>(c).map(|a| opcional(a, i, Float32Array::value));
+    let u = |c: &str| t.col::<UInt32Array>(c).map(|a| a.value(i));
+    let b8 = |c: &str| t.col::<UInt8Array>(c).map(|a| a.value(i));
+    let b = |c: &str| t.col::<BooleanArray>(c).map(|a| a.value(i));
+    Ok(Atrib {
+        alinhamento: valor_de(&ALINHAMENTOS, b8("alinhamento")?),
+        entrelinha: f("entrelinha")?,
+        antes: fo("antes")?,
+        depois: fo("depois")?,
+        fundo: u("fundo")?,
+        borda: b8("borda")?,
+        cor_borda: u("cor_borda")?,
+        lista: valor_de(&LISTAS, b8("lista")?),
+        marcado: b("marcado")?,
+        reiniciar: b("reiniciar")?,
+        recuo_esq: f("recuo_esq")?,
+        recuo_dir: f("recuo_dir")?,
+        primeira: f("primeira")?,
+        estilo: u("estilo")?,
+        sem_numero: b("sem_numero")?,
+        legenda: b8("legenda")?,
+        cor_marcador: u("cor_marcador")?,
+    })
+}
+
+/// Os blocos com o conteúdo próprio; o texto (trechos) entra depois, em `encher_trechos`.
+fn ler_blocos(t: &Lida) -> Result<Vec<Bloco>, String> {
+    let (id, tipo, nivel, ordenado) = (t.col::<UInt64Array>("id")?, t.col::<UInt8Array>("tipo")?, t.col::<UInt8Array>("nivel")?, t.col::<BooleanArray>("ordenado")?);
+    let (fonte, linguagem) = (t.col::<StringArray>("fonte")?, t.col::<StringArray>("linguagem")?);
+    let (largura, altura) = (t.col::<Float32Array>("largura")?, t.col::<Float32Array>("altura")?);
+    let (marca_a, marca_b, lista) = (t.col::<BooleanArray>("marca_a")?, t.col::<BooleanArray>("marca_b")?, t.col::<UInt8Array>("lista_sumario")?);
+    (0..t.linhas())
+        .map(|i| {
+            let texto_de = |a: &StringArray| opcional(a, i, |a, i| a.value(i).to_string()).unwrap_or_default();
+            let conteudo = match tipo.value(i) {
+                0 => Conteudo::Titulo { nivel: nivel.value(i), texto: Vec::new() },
+                1 => Conteudo::Paragrafo { texto: Vec::new() },
+                2 => Conteudo::Item { ordenado: ordenado.value(i), nivel: nivel.value(i), texto: Vec::new() },
+                3 => Conteudo::Citacao { texto: Vec::new() },
+                4 => Conteudo::Codigo { linguagem: texto_de(linguagem), codigo: texto_de(fonte) },
+                5 => Conteudo::Tabela { cabecalho: marca_a.value(i), linhas: Vec::new() },
+                6 => Conteudo::Imagem { origem: texto_de(fonte), legenda: Vec::new(), largura: largura.value(i), altura: altura.value(i) },
+                7 => Conteudo::Equacao { latex: texto_de(fonte) },
+                8 => Conteudo::Sumario { niveis: nivel.value(i), sem_numeros: marca_a.value(i), sem_pontilhado: marca_b.value(i), lista: lista.value(i) },
+                9 => Conteudo::Regua,
+                10 => Conteudo::QuebraDePagina,
+                11 => Conteudo::Bibliografia { todas: marca_a.value(i) },
+                12 => Conteudo::IndiceRemissivo,
+                outro => return Err(format!("blocos.arrow: tipo de bloco desconhecido ({outro}).")),
+            };
+            // A coluna é opcional para manter leitura de .fdoz antigos.
+            let codificado = t.col::<StringArray>("mesclagens").ok()
+                .map(|v| v.value(i)).unwrap_or("");
+            let mut mesclagens = Vec::new();
+            if !codificado.is_empty() {
+                for item in codificado.split(';') {
+                    let numeros: Vec<usize> = item.split(',').map(str::parse::<usize>)
+                        .collect::<Result<_, _>>()
+                        .map_err(|_| "Mesclagem inválida em blocos.arrow.")?;
+                    if numeros.len() != 3 || numeros[2] < 2 {
+                        return Err("Mesclagem inválida em blocos.arrow.".into());
+                    }
+                    mesclagens.push(MesclagemTabela {
+                        linha: numeros[0], coluna: numeros[1], colunas: numeros[2],
+                    });
+                }
+            }
+            Ok(Bloco { id: id.value(i), conteudo, atrib: ler_atrib(t, i)?, mesclagens })
+        })
+        .collect()
+}
+
+/// Põe os trechos nos blocos (no texto, na legenda ou na célula) e dá às tabelas a forma delas.
+fn encher_trechos(blocos: &mut [Bloco], trechos: &Lida, tabelas: &Lida) -> Result<(), String> {
+    let (tb, tl, tc) = (tabelas.col::<UInt32Array>("bloco")?, tabelas.col::<UInt32Array>("linha")?, tabelas.col::<UInt32Array>("celulas")?);
+    for i in 0..tabelas.linhas() {
+        if let Some(Conteudo::Tabela { linhas, .. }) = blocos.get_mut(tb.value(i) as usize).map(|b| &mut b.conteudo) {
+            let l = tl.value(i) as usize;
+            if linhas.len() <= l {
+                linhas.resize(l + 1, Vec::new());
+            }
+            linhas[l] = vec![Celula::new(); tc.value(i) as usize];
+        }
+    }
+    let (bloco, parte, linha, coluna) = (trechos.col::<UInt32Array>("bloco")?, trechos.col::<UInt8Array>("parte")?, trechos.col::<UInt32Array>("linha")?, trechos.col::<UInt32Array>("coluna")?);
+    let (texto, estilo, link) = (trechos.col::<StringArray>("texto")?, trechos.col::<UInt8Array>("estilo")?, trechos.col::<StringArray>("link")?);
+    let (tamanho, cor, realce, posicao) = (trechos.col::<Float32Array>("tamanho")?, trechos.col::<UInt32Array>("cor")?, trechos.col::<UInt32Array>("realce")?, trechos.col::<Int8Array>("posicao")?);
+    let mut lidos: Vec<Trecho> = (0..trechos.linhas())
+        .map(|i| Trecho {
+            texto: texto.value(i).to_string(),
+            estilo: estilo.value(i),
+            link: opcional(link, i, |a, i| a.value(i).to_string()),
+            fmt: Fmt { tamanho: tamanho.value(i), cor: cor.value(i), realce: realce.value(i), posicao: posicao.value(i) },
+            marca: marca_lida(trechos, i).map(Box::new),
+            rev: rev_lida(trechos, i).map(Box::new),
+            ..Trecho::default()
+        })
+        .collect();
+    // O texto das notas vai para dentro da chamada (a linha `dono`), de trás para a frente: as linhas
+    // de uma nota vêm logo depois da chamada dela.
+    let donos: Vec<Option<u32>> = (0..trechos.linhas()).map(|i| trechos.lote.column_by_name("dono").and_then(|c| c.as_any().downcast_ref::<UInt32Array>()).and_then(|a| opcional(a, i, UInt32Array::value))).collect();
+    let mut da_nota: Vec<Vec<Trecho>> = vec![Vec::new(); lidos.len()];
+    for i in (0..lidos.len()).rev() {
+        if let Some(d) = donos[i] {
+            let mut t = std::mem::take(&mut lidos[i]);
+            if let Some(Marca::Nota { texto, .. }) = t.marca.as_deref_mut() {
+                texto.append(&mut std::mem::take(&mut da_nota[i]));
+            }
+            da_nota.get_mut(d as usize).ok_or("trechos.arrow: nota sem chamada.")?.insert(0, t);
+        }
+    }
+    for (i, mut t) in lidos.into_iter().enumerate() {
+        if donos[i].is_some() {
+            continue;
+        }
+        if let Some(Marca::Nota { texto, .. }) = t.marca.as_deref_mut() {
+            *texto = std::mem::take(&mut da_nota[i]);
+        }
+        let Some(b) = blocos.get_mut(bloco.value(i) as usize) else { return Err("trechos.arrow aponta para um bloco que não existe.".into()) };
+        let destino: Option<&mut Vec<Trecho>> = match (&mut b.conteudo, parte.value(i)) {
+            (Conteudo::Titulo { texto, .. } | Conteudo::Paragrafo { texto } | Conteudo::Item { texto, .. } | Conteudo::Citacao { texto }, PARTE_TEXTO) => Some(texto),
+            (Conteudo::Imagem { legenda, .. }, PARTE_LEGENDA) => Some(legenda),
+            (Conteudo::Tabela { linhas, .. }, PARTE_CELULA) => linhas.get_mut(linha.value(i) as usize).and_then(|l| l.get_mut(coluna.value(i) as usize)),
+            _ => None,
+        };
+        destino.ok_or("trechos.arrow não bate com os blocos.")?.push(t);
+    }
+    Ok(())
+}
+
+/// A sugestão do trecho `i` (as colunas `rev…` faltam nos arquivos de antes delas).
+fn rev_lida(t: &Lida, i: usize) -> Option<Revisao> {
+    let tipo = match t.col::<UInt8Array>("rev").ok()?.value(i) {
+        1 => TipoDeRevisao::Insercao,
+        2 => TipoDeRevisao::Remocao,
+        _ => return None,
+    };
+    let texto = |c: &str| t.col::<StringArray>(c).ok().and_then(|a| opcional(a, i, |a, i| a.value(i).to_string())).unwrap_or_default();
+    Some(Revisao { tipo, autor: texto("rev_autor"), quando: texto("rev_quando") })
+}
+
+fn comentarios_arrow(c: &[Comentario]) -> Result<Vec<u8>, String> {
+    tabela(
+        vec![
+            ("id", Arc::new(UInt64Array::from(c.iter().map(|x| x.id).collect::<Vec<_>>()))),
+            ("autor", Arc::new(StringArray::from(c.iter().map(|x| x.autor.as_str()).collect::<Vec<_>>()))),
+            ("quando", Arc::new(StringArray::from(c.iter().map(|x| x.quando.as_str()).collect::<Vec<_>>()))),
+            ("texto", Arc::new(StringArray::from(c.iter().map(|x| x.texto.as_str()).collect::<Vec<_>>()))),
+            ("resolvido", Arc::new(BooleanArray::from(c.iter().map(|x| x.resolvido).collect::<Vec<_>>()))),
+        ],
+        HashMap::new(),
+    )
+}
+
+fn respostas_arrow(c: &[Comentario]) -> Result<Vec<u8>, String> {
+    let r: Vec<(u64, &Resposta)> = c.iter().flat_map(|x| x.respostas.iter().map(move |r| (x.id, r))).collect();
+    tabela(
+        vec![
+            ("comentario", Arc::new(UInt64Array::from(r.iter().map(|x| x.0).collect::<Vec<_>>()))),
+            ("autor", Arc::new(StringArray::from(r.iter().map(|x| x.1.autor.as_str()).collect::<Vec<_>>()))),
+            ("quando", Arc::new(StringArray::from(r.iter().map(|x| x.1.quando.as_str()).collect::<Vec<_>>()))),
+            ("texto", Arc::new(StringArray::from(r.iter().map(|x| x.1.texto.as_str()).collect::<Vec<_>>()))),
+        ],
+        HashMap::new(),
+    )
+}
+
+fn ler_comentarios(c: &Lida, r: Option<&Lida>) -> Result<Vec<Comentario>, String> {
+    let (id, autor, quando, texto, resolvido) = (c.col::<UInt64Array>("id")?, c.col::<StringArray>("autor")?, c.col::<StringArray>("quando")?, c.col::<StringArray>("texto")?, c.col::<BooleanArray>("resolvido")?);
+    let mut v: Vec<Comentario> = (0..c.linhas())
+        .map(|i| Comentario { id: id.value(i), autor: autor.value(i).into(), quando: quando.value(i).into(), texto: texto.value(i).into(), resolvido: resolvido.value(i), respostas: Vec::new() })
+        .collect();
+    if let Some(r) = r {
+        let (dono, autor, quando, texto) = (r.col::<UInt64Array>("comentario")?, r.col::<StringArray>("autor")?, r.col::<StringArray>("quando")?, r.col::<StringArray>("texto")?);
+        for i in 0..r.linhas() {
+            if let Some(c) = v.iter_mut().find(|c| c.id == dono.value(i)) {
+                c.respostas.push(Resposta { autor: autor.value(i).into(), quando: quando.value(i).into(), texto: texto.value(i).into() });
+            }
+        }
+    }
+    Ok(v)
+}
+
+/// O objeto preso ao trecho `i` (as colunas `marca…` faltam nos arquivos de antes delas).
+fn marca_lida(t: &Lida, i: usize) -> Option<Marca> {
+    let tipo = t.col::<UInt8Array>("marca").ok()?.value(i);
+    let texto = |c: &str| t.col::<StringArray>(c).ok().and_then(|a| opcional(a, i, |a, i| a.value(i).to_string())).unwrap_or_default();
+    let fim = t.col::<BooleanArray>("marca_fim").is_ok_and(|a| a.value(i));
+    marca_das_partes(tipo, texto("marca_a"), texto("marca_b"), fim)
+}
+
+fn ler_estilos(t: &Lida) -> Result<Vec<Estilo>, String> {
+    let (id, nome, base, bits) = (t.col::<UInt32Array>("id")?, t.col::<StringArray>("nome")?, t.col::<UInt8Array>("base")?, t.col::<UInt8Array>("bits")?);
+    let (tamanho, cor, alinhamento) = (t.col::<Float32Array>("tamanho")?, t.col::<UInt32Array>("cor")?, t.col::<UInt8Array>("alinhamento")?);
+    let (antes, depois, entrelinha) = (t.col::<Float32Array>("antes")?, t.col::<Float32Array>("depois")?, t.col::<Float32Array>("entrelinha")?);
+    Ok((0..t.linhas())
+        .map(|i| Estilo {
+            id: id.value(i),
+            nome: nome.value(i).to_string(),
+            base: base.value(i),
+            bits: bits.value(i),
+            tamanho: tamanho.value(i),
+            cor: cor.value(i),
+            alinhamento: valor_de(&ALINHAMENTOS, alinhamento.value(i)),
+            antes: opcional(antes, i, Float32Array::value),
+            depois: opcional(depois, i, Float32Array::value),
+            entrelinha: entrelinha.value(i),
+        })
+        .collect())
+}
+
+/// As colunas de texto de uma fonte, na ordem da tabela.
+const CAMPOS_DE_FONTE: [&str; 14] = ["chave", "titulo", "subtitulo", "ano", "edicao", "local", "editora", "veiculo", "volume", "numero", "paginas", "url", "acesso", "doi"];
+
+fn campos_de_fonte(f: &Fonte) -> [&str; 14] {
+    [&f.chave, &f.titulo, &f.subtitulo, &f.ano, &f.edicao, &f.local, &f.editora, &f.veiculo, &f.volume, &f.numero, &f.paginas, &f.url, &f.acesso, &f.doi]
+}
+
+fn fontes_arrow(fontes: &[Fonte]) -> Result<Vec<u8>, String> {
+    let mut colunas: Vec<(&str, ArrayRef)> = CAMPOS_DE_FONTE
+        .iter()
+        .enumerate()
+        .map(|(k, nome)| (*nome, Arc::new(StringArray::from(fontes.iter().map(|f| campos_de_fonte(f)[k]).collect::<Vec<_>>())) as ArrayRef))
+        .collect();
+    let autores: Vec<String> = fontes.iter().map(|f| f.autores.iter().map(|a| format!("{}{ENTRE_NOMES}{}", a.sobrenome, a.nome)).collect::<Vec<_>>().join(&ENTRE_AUTORES.to_string())).collect();
+    colunas.push(("autores", Arc::new(StringArray::from(autores))));
+    colunas.push(("tipo", Arc::new(UInt8Array::from(fontes.iter().map(|f| codigo_de(&TIPOS_DE_FONTE, &f.tipo)).collect::<Vec<_>>()))));
+    tabela(colunas, HashMap::new())
+}
+
+fn ler_fontes(t: &Lida) -> Result<Vec<Fonte>, String> {
+    let textos: Vec<&StringArray> = CAMPOS_DE_FONTE.iter().map(|c| t.col::<StringArray>(c)).collect::<Result<_, _>>()?;
+    let (autores, tipo) = (t.col::<StringArray>("autores")?, t.col::<UInt8Array>("tipo")?);
+    Ok((0..t.linhas())
+        .map(|i| {
+            let v = |k: usize| textos[k].value(i).to_string();
+            let autores = autores.value(i).split(ENTRE_AUTORES).filter(|a| !a.is_empty()).map(|a| {
+                let (sobrenome, nome) = a.split_once(ENTRE_NOMES).unwrap_or((a, ""));
+                Autor { sobrenome: sobrenome.to_string(), nome: nome.to_string() }
+            });
+            Fonte {
+                chave: v(0), tipo: valor_de(&TIPOS_DE_FONTE, tipo.value(i)), autores: autores.collect(), titulo: v(1), subtitulo: v(2), ano: v(3), edicao: v(4), local: v(5),
+                editora: v(6), veiculo: v(7), volume: v(8), numero: v(9), paginas: v(10), url: v(11), acesso: v(12), doi: v(13),
+            }
+        })
+        .collect())
+}
+
+fn ler_marcadores(t: &Lida) -> Result<Vec<Marcador>, String> {
+    let (nome, bloco) = (t.col::<StringArray>("nome")?, t.col::<UInt64Array>("bloco")?);
+    Ok((0..t.linhas()).map(|i| Marcador { nome: nome.value(i).to_string(), bloco: bloco.value(i) }).collect())
+}
+
+#[cfg(test)]
+mod testes;

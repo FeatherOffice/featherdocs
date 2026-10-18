@@ -1,0 +1,21 @@
+[package]
+name = "featherdocs-historico"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77.2"
+description = "O histórico de versões dentro do .fdoz: um repositório Git embutido (FORMATO.md)."
+
+# Só o aplicativo nativo (`src-tauri`) usa este crate: o `gix` não vai para o `.wasm`, e o
+# `.fdoz` abre em qualquer lugar sem ele (o leitor ignora a pasta `.git/`).
+# - `gix` (gitoxide): Git em Rust puro, sem `libgit2` — a escolha do `FORMATO.md`;
+# - `zip`: o contêiner .fdoz.
+[dependencies]
+gix = { version = "0.88", default-features = false, features = ["sha1"] }
+zip = { version = "4.2.0", default-features = false, features = ["deflate"] }
+
+[lib]
+name = "featherdocs_historico"
+
+[lints.clippy]
+too_many_lines = "deny"
+cognitive_complexity = "deny"

@@ -1,0 +1,87 @@
+\documentclass{article}
+\usepackage{amsmath,amssymb}
+\begin{document}
+
+\section{Fórmulas em linha}
+
+A equação de Einstein $E = mc^2$ cabe na linha; a soma $\sum_{i=1}^{n} i = \frac{n(n+1)}{2}$
+fica compacta, com os limites ao lado. As raízes $x_{1,2} = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}$
+e o limite $\lim_{x \to 0} \frac{\sin x}{x} = 1$ seguem o estilo de texto, assim como
+$\alpha + \beta \leq \gamma$, $\mathbb{R}^n$, $\vec{v} \cdot \hat{n}$ e $f'(x) = \lim_{h\to 0}\frac{f(x+h)-f(x)}{h}$.
+
+\section{Fórmulas em destaque}
+
+\[ \int_0^\infty e^{-x^2}\,dx = \frac{\sqrt{\pi}}{2} \]
+
+\begin{equation}
+  \oint_{\partial S} \mathbf{F} \cdot d\mathbf{r} = \iint_S (\nabla \times \mathbf{F}) \cdot d\mathbf{S} \label{eq:stokes}
+\end{equation}
+
+\begin{equation}
+  \binom{n}{k} = \frac{n!}{k!\,(n-k)!}
+\end{equation}
+
+\begin{align}
+  (a+b)^2 &= a^2 + 2ab + b^2 \\
+  (a-b)^2 &= a^2 - 2ab + b^2 \nonumber \\
+  a^2 - b^2 &= (a+b)(a-b)
+\end{align}
+
+\[ \sqrt[3]{\frac{x^3 + y^3}{x + y}} \quad \sqrt{1 + \sqrt{1 + \sqrt{1 + x}}} \]
+
+\[ \left( \sum_{k=1}^{n} a_k b_k \right)^2 \leq \left( \sum_{k=1}^{n} a_k^2 \right) \left( \sum_{k=1}^{n} b_k^2 \right) \]
+
+\[ A = \begin{pmatrix} a_{11} & a_{12} & \cdots & a_{1n} \\ a_{21} & a_{22} & \cdots & a_{2n} \\ \vdots & \vdots & \ddots & \vdots \\ a_{m1} & a_{m2} & \cdots & a_{mn} \end{pmatrix} \]
+
+\[ \det \begin{vmatrix} a & b \\ c & d \end{vmatrix} = ad - bc, \qquad \begin{bmatrix} 1 & 0 \\ 0 & 1 \end{bmatrix} \]
+
+\[ |x| = \begin{cases} x & \text{se } x \geq 0, \\ -x & \text{se } x < 0. \end{cases} \]
+
+\begin{gather}
+  \nabla \cdot \mathbf{E} = \frac{\rho}{\varepsilon_0} \\
+  \nabla \times \mathbf{B} - \mu_0 \varepsilon_0 \frac{\partial \mathbf{E}}{\partial t} = \mu_0 \mathbf{J}
+\end{gather}
+
+\[ \zeta(s) = \sum_{n=1}^{\infty} \frac{1}{n^s} = \prod_{p \text{ primo}} \frac{1}{1 - p^{-s}} \]
+
+\[ \overbrace{1 + 2 + \cdots + n}^{n \text{ termos}} = \underbrace{\frac{n(n+1)}{2}}_{\text{Gauss}} \]
+
+\[ \hat{x}\,\bar{y}\,\tilde{z}\,\dot{a}\,\ddot{b}\,\vec{F} \quad \widehat{ABC} \quad \overline{z_1 z_2} = \bar{z}_1 \bar{z}_2 \]
+
+\[ \mathcal{L}\{f\}(s) = \int_0^{\infty} f(t) e^{-st}\,dt, \qquad \mathfrak{g}, \ \mathsf{A}, \ \mathtt{x}, \ \boldsymbol{\alpha} \]
+
+\[ \forall \varepsilon > 0\ \exists \delta > 0 : |x - a| < \delta \implies |f(x) - f(a)| < \varepsilon \]
+
+\[ A \subseteq B \cup C, \quad x \in \mathbb{Q} \setminus \mathbb{Z}, \quad f \colon X \to Y, \quad a \equiv b \pmod{n} \]
+
+\begin{equation}
+  \boxed{e^{i\pi} + 1 = 0} \tag{Euler}
+\end{equation}
+
+\[ \Biggl( \biggl( \Bigl( \bigl( x \bigr) \Bigr) \biggr) \Biggr) \quad \left\langle \psi \middle| \hat{H} \middle| \psi \right\rangle \]
+
+\[ \operatorname{tr}(AB) = \operatorname{tr}(BA), \quad \max_{1 \le i \le n} |x_i| = \|x\|_\infty \]
+
+\begin{multline}
+  p(x) = 3x^6 + 14x^5y + 590x^4y^2 + 19x^3y^3 \\
+  - 12x^2y^4 - 12xy^5 + 2y^6 - a^3b^3
+\end{multline}
+
+\begin{equation}
+  \begin{split}
+    f(x) &= (x+1)^2 \\
+         &= x^2 + 2x + 1
+  \end{split}
+\end{equation}
+
+\[ \frac{1}{1 + \cfrac{1}{1 + \cfrac{1}{1 + x}}} \qquad \frac{\partial^2 u}{\partial t^2} = c^2 \nabla^2 u \]
+
+\[ \Gamma(z) = \int_0^\infty t^{z-1} e^{-t}\,dt, \quad \Re(z) > 0 \]
+
+\[ \lim_{n \to \infty} \left( 1 + \frac{1}{n} \right)^n = e \approx 2{,}71828 \]
+
+\[ X \xrightarrow{f} Y \xrightarrow[\text{iso}]{g} Z, \qquad a \stackrel{\text{def}}{=} b \]
+
+Fim do exemplo: são 33 fórmulas, 8 no texto e 25 em destaque.
+
+\end{document}

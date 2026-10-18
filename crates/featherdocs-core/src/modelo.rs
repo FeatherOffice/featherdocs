@@ -1,0 +1,726 @@
+//! O documento: uma árvore de blocos de tipo fechado. Formatação é anotação
+//! estrutural no trecho de texto (`estilo`), nunca marcação solta que se acumula.
+
+use serde::{Deserialize, Serialize};
+
+/// Bits de `Trecho::estilo`.
+pub const NEGRITO: u8 = 1;
+pub const ITALICO: u8 = 2;
+pub const CODIGO: u8 = 4;
+pub const SUBLINHADO: u8 = 8;
+pub const TACHADO: u8 = 16;
+/// Fonte com serifa (Liberation Serif); sem este bit e sem `CODIGO`, a fonte é a sem serifa.
+pub const SERIFA: u8 = 64;
+/// Fórmula LaTeX em linha (`$...$`); o `texto` guarda o LaTeX.
+pub const MATEMATICA: u8 = 32;
+/// Só no desenho (nunca gravado num `Trecho`): com `MATEMATICA`, a fórmula é em destaque (estilo
+/// display, várias linhas), não a de dentro do parágrafo.
+pub const EXIBIDA: u8 = 128;
+
+fn zero(n: &u8) -> bool {
+    *n == 0
+}
+
+/// Formatação de caractere além dos bits de `estilo`: tamanho, cor, realce e posição. Tudo zero = o padrão do bloco.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Fmt {
+    /// Corpo em pontos; 0 = o do tipo de bloco.
+    #[serde(default)]
+    pub tamanho: f32,
+    /// Cor do texto `0xRRGGBBAA`; 0 = automática.
+    #[serde(default)]
+    pub cor: u32,
+    /// Cor do marca-texto `0xRRGGBBAA`; 0 = sem realce.
+    #[serde(default)]
+    pub realce: u32,
+    /// 1 = sobrescrito, -1 = subscrito, 0 = normal.
+    #[serde(default)]
+    pub posicao: i8,
+}
+
+impl Fmt {
+    pub fn eh_padrao(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// O caractere que guarda, no texto, o lugar de um objeto preso a ele (nota, citação, campo…):
+/// para o cursor, a seleção e o apagar, o objeto é **um caractere só**.
+pub const OBJETO: char = '\u{FFFC}';
+
+/// Um objeto preso a um ponto do texto. O trecho que o carrega tem `texto` = [`OBJETO`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "tipo", rename_all = "snake_case")]
+pub enum Marca {
+    /// Nota de rodapé (ou de fim, com `fim`), com o texto dela. O número sai da ordem no documento.
+    Nota {
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        fim: bool,
+        texto: Vec<Trecho>,
+    },
+    /// Citação das fontes `chaves` (de `Documento::fontes`), com a página citada.
+    Citacao {
+        chaves: Vec<String>,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        pagina: String,
+    },
+    /// Entrada do índice remissivo (não aparece no texto).
+    Indice {
+        termo: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        sub: String,
+    },
+    /// Campo que se atualiza sozinho: `autor`, `titulo`, `data`, `pagina`, `paginas`, `arquivo`.
+    Campo { campo: String },
+    /// O começo (ou o fim, com `fim`) do trecho comentado pelo comentário `id` (`Documento::comentarios`).
+    Comentario {
+        id: u64,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        fim: bool,
+    },
+}
+
+/// Uma alteração sugerida (controle de alterações): texto inserido ou apagado, por quem e quando.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TipoDeRevisao {
+    Insercao,
+    Remocao,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Revisao {
+    pub tipo: TipoDeRevisao,
+    #[serde(default)]
+    pub autor: String,
+    #[serde(default)]
+    pub quando: String,
+}
+
+/// Uma resposta num comentário.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Resposta {
+    #[serde(default)]
+    pub autor: String,
+    #[serde(default)]
+    pub quando: String,
+    pub texto: String,
+}
+
+/// Um comentário na margem, ligado a um trecho do texto pelas duas marcas `Marca::Comentario`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Comentario {
+    pub id: u64,
+    #[serde(default)]
+    pub autor: String,
+    #[serde(default)]
+    pub quando: String,
+    pub texto: String,
+    #[serde(default)]
+    pub resolvido: bool,
+    #[serde(default)]
+    pub respostas: Vec<Resposta>,
+}
+
+/// Um pedaço de texto com a mesma formatação.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Trecho {
+    pub texto: String,
+    #[serde(default, skip_serializing_if = "zero")]
+    pub estilo: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
+    #[serde(default, skip_serializing_if = "Fmt::eh_padrao")]
+    pub fmt: Fmt,
+    /// O objeto que este trecho carrega (então `texto` é um [`OBJETO`] só).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub marca: Option<Box<Marca>>,
+    /// O que o objeto mostra agora ("1", "(SILVA, 2023)"); o motor refaz a cada mudança, não se grava.
+    #[serde(skip)]
+    pub rotulo: String,
+    /// Alteração sugerida (texto inserido ou apagado à espera de aceitar ou rejeitar).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rev: Option<Box<Revisao>>,
+}
+
+impl Trecho {
+    /// Um trecho sem formatação.
+    pub fn simples(texto: &str) -> Self {
+        Self { texto: texto.to_string(), ..Self::default() }
+    }
+
+    /// O trecho de um objeto preso ao texto.
+    pub fn objeto(marca: Marca) -> Self {
+        Self { texto: OBJETO.to_string(), marca: Some(Box::new(marca)), ..Self::default() }
+    }
+}
+
+/// Uma célula de tabela: texto com formatação.
+pub type Celula = Vec<Trecho>;
+
+/// O que um bloco é. O tipo é fechado: nada de "quase qualquer coisa" em texto opaco.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "tipo", rename_all = "snake_case")]
+pub enum Conteudo {
+    Titulo { nivel: u8, texto: Vec<Trecho> },
+    Paragrafo { texto: Vec<Trecho> },
+    /// Item de lista; a lista é a sequência de itens vizinhos (a numeração sai da posição).
+    Item { ordenado: bool, nivel: u8, texto: Vec<Trecho> },
+    Citacao { texto: Vec<Trecho> },
+    Codigo { linguagem: String, codigo: String },
+    Tabela { cabecalho: bool, linhas: Vec<Vec<Celula>> },
+    Imagem { origem: String, legenda: Vec<Trecho>, largura: f32, altura: f32 },
+    Equacao { latex: String },
+    /// Sumário automático: gerado dos títulos até `niveis`, com o número da página (e o pontilhado até ele).
+    Sumario {
+        niveis: u8,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        sem_numeros: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        sem_pontilhado: bool,
+        /// 0 = sumário (títulos); 1, 2 = lista de figuras, de tabelas (as legendas desse tipo).
+        #[serde(default, skip_serializing_if = "zero")]
+        lista: u8,
+    },
+    Regua,
+    QuebraDePagina,
+    /// Referências (bibliografia) geradas das fontes citadas no estilo do documento; `todas` = também as não citadas.
+    Bibliografia {
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        todas: bool,
+    },
+    /// Índice remissivo gerado das entradas marcadas (`Marca::Indice`), com as páginas.
+    IndiceRemissivo,
+}
+
+impl Conteudo {
+    /// Um sumário até o nível `niveis`, com números de página e pontilhado.
+    pub fn sumario(niveis: u8) -> Self {
+        Self::Sumario { niveis, sem_numeros: false, sem_pontilhado: false, lista: 0 }
+    }
+
+    /// Todos os textos com formatação do bloco: o texto corrido, cada célula, a legenda da imagem.
+    pub fn textos(&self) -> Vec<&Vec<Trecho>> {
+        match self {
+            Self::Titulo { texto, .. } | Self::Paragrafo { texto } | Self::Item { texto, .. } | Self::Citacao { texto } => vec![texto],
+            Self::Tabela { linhas, .. } => linhas.iter().flatten().collect(),
+            Self::Imagem { legenda, .. } => vec![legenda],
+            _ => Vec::new(),
+        }
+    }
+
+    /// Como `textos`, para mudar.
+    pub fn textos_mut(&mut self) -> Vec<&mut Vec<Trecho>> {
+        match self {
+            Self::Titulo { texto, .. } | Self::Paragrafo { texto } | Self::Item { texto, .. } | Self::Citacao { texto } => vec![texto],
+            Self::Tabela { linhas, .. } => linhas.iter_mut().flatten().collect(),
+            Self::Imagem { legenda, .. } => vec![legenda],
+            _ => Vec::new(),
+        }
+    }
+}
+
+/// Alinhamento horizontal do texto de um parágrafo.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Alinhamento {
+    #[default]
+    Esquerda,
+    Centro,
+    Direita,
+    Justificado,
+}
+
+/// O estilo do marcador de um item de lista.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Lista {
+    /// O padrão do nível (•, ◦, ▪ ou 1.).
+    #[default]
+    Padrao,
+    Circulo,
+    Quadrado,
+    Seta,
+    Tarefa,
+    /// 1. 2. 3.
+    Numerica,
+    /// a) b) c)
+    Alfabetica,
+    /// I. II. III.
+    Romana,
+}
+
+/// Passo de recuo (1,25 cm) em pontos.
+pub const PASSO_RECUO: f32 = 35.43;
+
+/// Atributos de parágrafo que valem para o bloco todo: alinhamento e recuos (em pontos).
+/// `primeira` soma ao recuo esquerdo só na primeira linha (negativo = deslocamento para fora).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Atrib {
+    #[serde(default)]
+    pub alinhamento: Alinhamento,
+    /// Entrelinha como múltiplo (1,0 · 1,15 · 1,5 · 2,0…); 0 = a padrão (1,15).
+    #[serde(default)]
+    pub entrelinha: f32,
+    /// Espaço antes e depois do parágrafo em pontos; `None` = o do tipo de bloco.
+    #[serde(default)]
+    pub antes: Option<f32>,
+    #[serde(default)]
+    pub depois: Option<f32>,
+    /// Cor de fundo do parágrafo `0xRRGGBBAA`; 0 = sem fundo.
+    #[serde(default)]
+    pub fundo: u32,
+    /// Bordas: bits 1 esquerda, 2 direita, 4 em cima, 8 embaixo.
+    #[serde(default)]
+    pub borda: u8,
+    /// Cor das bordas `0xRRGGBBAA`; 0 = a do texto (a chamada usa uma cor própria, e mais grossa).
+    #[serde(default)]
+    pub cor_borda: u32,
+    /// Estilo do marcador (só em item de lista).
+    #[serde(default)]
+    pub lista: Lista,
+    /// Tarefa marcada (só quando `lista` é `Tarefa`).
+    #[serde(default)]
+    pub marcado: bool,
+    /// A numeração recomeça em 1 neste item.
+    #[serde(default)]
+    pub reiniciar: bool,
+    #[serde(default)]
+    pub recuo_esq: f32,
+    #[serde(default)]
+    pub recuo_dir: f32,
+    #[serde(default)]
+    pub primeira: f32,
+    /// O estilo com nome do parágrafo (`Estilos::lista`); 0 = só o tipo do bloco.
+    #[serde(default)]
+    pub estilo: u32,
+    /// Título que fica fora da numeração automática.
+    #[serde(default)]
+    pub sem_numero: bool,
+    /// Parágrafo de legenda: 1 = figura, 2 = tabela, 3 = equação (o número sai sozinho: "Figura 1 –").
+    #[serde(default)]
+    pub legenda: u8,
+    /// Cor do marcador do item de lista `0xRRGGBBAA`; 0 = a do texto.
+    #[serde(default)]
+    pub cor_marcador: u32,
+}
+
+impl Atrib {
+    pub fn eh_padrao(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+/// Mesclagem horizontal de células de tabela, ancorada na primeira coluna.
+/// A linha conserva suas células originais e apenas células vazias podem ser
+/// encobertas; o conteúdo do usuário nunca é descartado.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MesclagemTabela {
+    pub linha: usize,
+    pub coluna: usize,
+    pub colunas: usize,
+}
+
+impl MesclagemTabela {
+    pub fn contem(&self, linha: usize, coluna: usize) -> bool {
+        linha == self.linha
+            && coluna >= self.coluna
+            && coluna < self.coluna.saturating_add(self.colunas)
+    }
+}
+
+/// Um bloco com identidade estável (o `id` não muda ao mover ou editar).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Bloco {
+    pub id: u64,
+    #[serde(flatten)]
+    pub conteudo: Conteudo,
+    #[serde(default, skip_serializing_if = "Atrib::eh_padrao")]
+    pub atrib: Atrib,
+    /// Mesclagens horizontais; ausente em arquivos legados. Não altera o
+    /// modelo textual nem os campos serializados dos tipos de conteúdo.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mesclagens: Vec<MesclagemTabela>,
+}
+
+impl Bloco {
+    /// Um bloco com os atributos de parágrafo padrão.
+    pub fn novo(id: u64, conteudo: Conteudo) -> Self {
+        Self { id, conteudo, atrib: Atrib::default(), mesclagens: Vec::new() }
+    }
+}
+
+/// O papel e as margens, em pontos (1 pt = 1/72 polegada).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ConfigPagina {
+    pub largura: f32,
+    pub altura: f32,
+    pub margem_sup: f32,
+    pub margem_dir: f32,
+    pub margem_inf: f32,
+    pub margem_esq: f32,
+}
+
+impl ConfigPagina {
+    /// A4 com margem de 2,54 cm.
+    pub fn a4() -> Self {
+        Self { largura: 595.28, altura: 841.89, margem_sup: 72.0, margem_dir: 72.0, margem_inf: 72.0, margem_esq: 72.0 }
+    }
+    /// Carta (EUA) com margem de 2,54 cm.
+    pub fn carta() -> Self {
+        Self { largura: 612.0, altura: 792.0, ..Self::a4() }
+    }
+    /// A largura útil do texto.
+    pub fn largura_util(&self) -> f32 {
+        self.largura - self.margem_esq - self.margem_dir
+    }
+    /// A altura útil do texto.
+    pub fn altura_util(&self) -> f32 {
+        self.altura - self.margem_sup - self.margem_inf
+    }
+}
+
+impl Default for ConfigPagina {
+    fn default() -> Self {
+        Self::a4()
+    }
+}
+
+/// Título e autor do documento.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Meta {
+    #[serde(default)]
+    pub titulo: String,
+    #[serde(default)]
+    pub autor: String,
+}
+
+/// Os três lugares de texto de um cabeçalho ou rodapé. Os campos `{pagina}`, `{total}`,
+/// `{pagina_romano}`, `{titulo}` e `{autor}` são resolvidos a cada página.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Faixas {
+    #[serde(default)]
+    pub esquerda: String,
+    #[serde(default)]
+    pub centro: String,
+    #[serde(default)]
+    pub direita: String,
+}
+
+impl Faixas {
+    pub fn vazia(&self) -> bool {
+        self.esquerda.is_empty() && self.centro.is_empty() && self.direita.is_empty()
+    }
+}
+
+fn rodape_padrao() -> Faixas {
+    Faixas { centro: "{pagina}".to_string(), ..Faixas::default() }
+}
+
+/// O que vale para a página inteira além do papel: cabeçalho, rodapé e plano de fundo.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Extras {
+    #[serde(default)]
+    pub cabecalho: Faixas,
+    #[serde(default = "rodape_padrao")]
+    pub rodape: Faixas,
+    /// Sem cabeçalho e rodapé na primeira página (a capa).
+    #[serde(default)]
+    pub primeira_diferente: bool,
+    /// Cor do papel `0xRRGGBBAA`; 0 = branco.
+    #[serde(default)]
+    pub cor_pagina: u32,
+    /// Marca d'água (texto na diagonal); vazio = sem.
+    #[serde(default)]
+    pub marca: String,
+    #[serde(default)]
+    pub marca_cor: u32,
+    /// Borda da página: cor (0 = sem), espessura e distância da borda do papel, em pontos.
+    #[serde(default)]
+    pub borda_cor: u32,
+    #[serde(default)]
+    pub borda_espessura: f32,
+    #[serde(default)]
+    pub borda_distancia: f32,
+    /// Onde o texto fica na altura da página (Layout → Alinhamento vertical).
+    #[serde(default)]
+    pub vertical: Vertical,
+    /// Números de linha na margem esquerda.
+    #[serde(default)]
+    pub numerar_linhas: NumeracaoDeLinhas,
+    /// O número das notas de rodapé e das de fim: 0 = 1, 2, 3 · 1 = a, b, c · 2 = i, ii, iii · 3 = *, †, ‡.
+    #[serde(default)]
+    pub formato_notas: u8,
+    #[serde(default = "dois")]
+    pub formato_notas_fim: u8,
+    /// Controle de alterações ligado (Revisão → Modo: Sugerindo): o que se digita ou apaga vira sugestão.
+    #[serde(default)]
+    pub controlar_alteracoes: bool,
+    /// Documento protegido (Revisão → Proteger): só leitura e comentários até desproteger.
+    #[serde(default)]
+    pub protegido: bool,
+}
+
+fn dois() -> u8 {
+    2
+}
+
+/// O alinhamento vertical do texto na página.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Vertical {
+    #[default]
+    Topo,
+    Centro,
+    Base,
+}
+
+/// Números de linha na margem.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NumeracaoDeLinhas {
+    #[default]
+    Nenhuma,
+    /// 1, 2, 3… do começo ao fim do documento.
+    Continua,
+    /// Recomeça em 1 a cada página.
+    PorPagina,
+}
+
+impl Default for Extras {
+    fn default() -> Self {
+        Self { cabecalho: Faixas::default(), rodape: rodape_padrao(), primeira_diferente: false, cor_pagina: 0, marca: String::new(), marca_cor: 0, borda_cor: 0, borda_espessura: 0.0, borda_distancia: 0.0, vertical: Vertical::Topo, numerar_linhas: NumeracaoDeLinhas::Nenhuma, formato_notas: 0, formato_notas_fim: 2, controlar_alteracoes: false, protegido: false }
+    }
+}
+
+/// A numeração automática dos títulos.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Numeracao {
+    #[default]
+    Nenhuma,
+    /// 1 · 1.1 · 1.1.1
+    Decimal,
+    /// Capítulo 1 · 1.1 · 1.1.1
+    Capitulo,
+}
+
+/// Um estilo de parágrafo com nome, criado pelo usuário. A base diz o tipo do bloco (e o nível no
+/// sumário); o resto é o padrão do texto, que a formatação feita à mão continua podendo mudar.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Estilo {
+    pub id: u32,
+    pub nome: String,
+    /// 0 = parágrafo; 1 a 6 = Título 1 a 6.
+    pub base: u8,
+    /// Bits de `Trecho::estilo` que valem para o parágrafo todo (NEGRITO, ITALICO, SUBLINHADO, SERIFA, CODIGO).
+    #[serde(default)]
+    pub bits: u8,
+    /// Corpo em pontos; 0 = o da base.
+    #[serde(default)]
+    pub tamanho: f32,
+    /// `0xRRGGBBAA`; 0 = automática.
+    #[serde(default)]
+    pub cor: u32,
+    #[serde(default)]
+    pub alinhamento: Alinhamento,
+    /// Espaço antes e depois em pontos; `None` = o da base.
+    #[serde(default)]
+    pub antes: Option<f32>,
+    #[serde(default)]
+    pub depois: Option<f32>,
+    /// 0 = a padrão.
+    #[serde(default)]
+    pub entrelinha: f32,
+}
+
+/// Os estilos com nome e a numeração dos títulos.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Estilos {
+    #[serde(default)]
+    pub numeracao: Numeracao,
+    #[serde(default)]
+    pub lista: Vec<Estilo>,
+}
+
+impl Estilos {
+    pub fn eh_padrao(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// O estilo `id` (0 ou um id que não existe mais = nenhum).
+    pub fn pegar(&self, id: u32) -> Option<&Estilo> {
+        if id == 0 {
+            return None;
+        }
+        self.lista.iter().find(|e| e.id == id)
+    }
+    /// O estilo com nome que vale para o bloco: só se o tipo dele ainda é o da base do estilo
+    /// (o parágrafo que nasceu de um Enter num título com estilo não herda a letra do título).
+    pub fn do_bloco(&self, b: &Bloco) -> Option<&Estilo> {
+        self.pegar(b.atrib.estilo).filter(|e| base_do_conteudo(&b.conteudo) == Some(e.base))
+    }
+}
+
+/// 0 para parágrafo, o nível para título; os outros tipos não recebem estilo com nome.
+pub fn base_do_conteudo(c: &Conteudo) -> Option<u8> {
+    match c {
+        Conteudo::Paragrafo { .. } => Some(0),
+        Conteudo::Titulo { nivel, .. } => Some(*nivel),
+        _ => None,
+    }
+}
+
+/// O documento inteiro.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Documento {
+    pub meta: Meta,
+    pub pagina: ConfigPagina,
+    pub blocos: Vec<Bloco>,
+    pub proximo_id: u64,
+    #[serde(default)]
+    pub extras: Extras,
+    #[serde(default)]
+    pub estilos: Estilos,
+    /// Os marcadores (Inserir → Marcador): um nome para um bloco, alvo de referência cruzada.
+    #[serde(default)]
+    pub marcadores: Vec<Marcador>,
+    /// As fontes citadas e o estilo das citações.
+    #[serde(default)]
+    pub bibliografia: Bibliografia,
+    /// Os comentários (o trecho de cada um é marcado no texto por `Marca::Comentario`).
+    #[serde(default)]
+    pub comentarios: Vec<Comentario>,
+}
+
+/// Um autor de uma fonte.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Autor {
+    pub sobrenome: String,
+    #[serde(default)]
+    pub nome: String,
+}
+
+/// O tipo de uma fonte (muda a forma da referência).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TipoDeFonte {
+    #[default]
+    Livro,
+    Capitulo,
+    Artigo,
+    Site,
+    Tese,
+    Relatorio,
+    Outro,
+}
+
+/// Uma fonte (obra citada) do documento. `veiculo` é o periódico (artigo), o livro (capítulo) ou o
+/// programa/curso (tese).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Fonte {
+    /// O nome curto pelo qual o texto a cita ("silva2023"), como no BibTeX.
+    pub chave: String,
+    #[serde(default)]
+    pub tipo: TipoDeFonte,
+    #[serde(default)]
+    pub autores: Vec<Autor>,
+    #[serde(default)]
+    pub titulo: String,
+    #[serde(default)]
+    pub subtitulo: String,
+    #[serde(default)]
+    pub ano: String,
+    #[serde(default)]
+    pub edicao: String,
+    #[serde(default)]
+    pub local: String,
+    #[serde(default)]
+    pub editora: String,
+    #[serde(default)]
+    pub veiculo: String,
+    #[serde(default)]
+    pub volume: String,
+    #[serde(default)]
+    pub numero: String,
+    #[serde(default)]
+    pub paginas: String,
+    #[serde(default)]
+    pub url: String,
+    /// Data de acesso (de página da internet), como o usuário escreve.
+    #[serde(default)]
+    pub acesso: String,
+    #[serde(default)]
+    pub doi: String,
+}
+
+/// O estilo das citações e das referências.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EstiloDeCitacao {
+    /// NBR 10520 (autor-data) e NBR 6023.
+    #[default]
+    Abnt,
+    Apa,
+    Vancouver,
+    Ieee,
+    Chicago,
+}
+
+/// As fontes do documento e o estilo em que são citadas.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Bibliografia {
+    #[serde(default)]
+    pub estilo: EstiloDeCitacao,
+    #[serde(default)]
+    pub fontes: Vec<Fonte>,
+}
+
+/// Um marcador: o nome e o bloco para onde ele aponta.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Marcador {
+    pub nome: String,
+    pub bloco: u64,
+}
+
+impl Default for Documento {
+    /// Um documento novo: um parágrafo vazio.
+    fn default() -> Self {
+        let mut d = Self { meta: Meta::default(), pagina: ConfigPagina::a4(), blocos: Vec::new(), proximo_id: 1, extras: Extras::default(), estilos: Estilos::default(), marcadores: Vec::new(), bibliografia: Bibliografia::default(), comentarios: Vec::new() };
+        d.acrescentar(Conteudo::Paragrafo { texto: Vec::new() });
+        d
+    }
+}
+
+impl Documento {
+    /// Um documento sem nenhum bloco (para quem vai preenchê-lo, como os leitores de arquivo).
+    pub fn vazio() -> Self {
+        Self { meta: Meta::default(), pagina: ConfigPagina::a4(), blocos: Vec::new(), proximo_id: 1, extras: Extras::default(), estilos: Estilos::default(), marcadores: Vec::new(), bibliografia: Bibliografia::default(), comentarios: Vec::new() }
+    }
+
+    /// Dá um `id` novo a um bloco.
+    pub fn novo_bloco(&mut self, conteudo: Conteudo) -> Bloco {
+        let id = self.proximo_id;
+        self.proximo_id += 1;
+        Bloco::novo(id, conteudo)
+    }
+
+    /// Acrescenta um bloco no fim e devolve o `id`.
+    pub fn acrescentar(&mut self, conteudo: Conteudo) -> u64 {
+        let b = self.novo_bloco(conteudo);
+        let id = b.id;
+        self.blocos.push(b);
+        id
+    }
+
+    /// A posição do bloco com este `id`.
+    pub fn indice(&self, id: u64) -> Option<usize> {
+        self.blocos.iter().position(|b| b.id == id)
+    }
+
+    /// Garante que `proximo_id` é maior que todo `id` (depois de ler de um arquivo).
+    pub fn acertar_ids(&mut self) {
+        let maior = self.blocos.iter().map(|b| b.id).max().unwrap_or(0);
+        self.proximo_id = self.proximo_id.max(maior + 1);
+    }
+}

@@ -1,0 +1,39 @@
+[package]
+name = "featherdocs-io"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77.2"
+description = "Ler e gravar os arquivos do FeatherDocs: .fdoz (próprio), Markdown, LaTeX e .docx."
+
+# Todas Rust puro, sem biblioteca C por trás (regra 7 do CLAUDE.md da raiz):
+# - `zip` (deflate): o contêiner .fdoz e o .docx (que também é um ZIP);
+# - `arrow` (só IPC, a mesma versão do `feathersheet-io`): o documento dentro do .fdoz é Arrow
+#   colunar, como o `.fshz` da planilha — nada de JSON no arquivo;
+# - `serde_json`: os comandos da ponte (o arquivo não usa mais);
+# - `pulldown-cmark`: o leitor de Markdown (CommonMark), o mais rápido do ecossistema —
+#   é um leitor por eventos, sem montar árvore intermediária;
+# - `quick-xml`: o XML do .docx, lido em fluxo (sem carregar a árvore DOM inteira).
+# O leitor de LaTeX é próprio (o subconjunto de documento: seções, listas, tabelas,
+# fórmulas); não existe crate em Rust que o faça.
+[dependencies]
+featherdocs-core = { path = "../featherdocs-core" }
+# Fórmulas: LaTeX ↔ OMML (a equação nativa do Word) no .docx.
+feather-math = { path = "../feather-math" }
+feather-charts = { git = "https://github.com/FeatherOffice/feather-charts", tag = "v0.3.1" }
+feather-draw = { git = "https://github.com/FeatherOffice/feather-draw", tag = "v0.1.1" }
+# Base64/data URLs são compartilhados com Slide; formatos DOCX/FDOZ permanecem neste crate.
+feather-image = { git = "https://github.com/FeatherOffice/feather-io", tag = "v0.1.1" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+zip = { version = "4.2.0", default-features = false, features = ["deflate"] }
+pulldown-cmark = { version = "0.13", default-features = false }
+quick-xml = "0.42"
+arrow = { version = "56", default-features = false, features = ["ipc"] }
+
+[lib]
+name = "featherdocs_io"
+
+[lints.clippy]
+too_many_lines = "deny"
+cognitive_complexity = "deny"
+

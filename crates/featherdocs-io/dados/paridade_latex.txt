@@ -1,0 +1,1451 @@
+// Dados do inventário de paridade LaTeX -> FeatherDocs. Lidos por examples/paridade_latex.rs.
+// Gramática (uma linha por item):
+//   >texto            linha literal do Markdown ({{TOTAL}} e {{TABELA}} são trocados); >@fim ... = daqui em diante vai depois das seções
+//   # Seção           abre uma seção numerada (conta pronto/parcial/falta)
+//   ## Subseção       subtítulo dentro da seção
+//   @cls article      classe do documento de teste ("[a4paper]{book}" se tiver chave)
+//   @pkg a,b          pacotes carregados nos itens seguintes ("@pkg -" = nenhum)
+//   @pre texto        preâmbulo extra para os itens seguintes (⏎ = quebra de linha)
+//   nome @@ trecho @@ esperado
+//        trecho = corpo do documento; "preâmbulo §§ corpo" põe a primeira parte antes de \begin{document};
+//        ZQX marca o texto que precisa sobreviver; ⏎ = quebra de linha.
+//        esperado = critérios ligados por & (b i u s tt sf m sup sub cor realce tam link mark cit cod tab img eq math reg qp sum lof lot bib idx
+//        item ord nivel2 centro dir esq just fundo borda entrelinha antes recuo primeira legenda mescla semnumero paisagem carta a5 margem
+//        titulo autor pagprimeira corpagina marcadagua bordapag numlinhas fonte marcadores estilos capnum decnum ign
+//        h:N linhas:N colunas:N txt:X sem:X marca:nota|cit|indice|campo|coment campo:X estilocit:X cab:X rod:X);
+//        vazio = "só reconhecido"; "=x" "=~" "= " = marca fixa à mão (o que o leitor não mostra: desenho, hifenização…).
+>> Inventário de paridade com o LaTeX (levantamento de 15/10/2026, status MEDIDO, não deduzido).
+>>
+>> Cada item abaixo é lido por um trecho mínimo de LaTeX no leitor próprio (`crates/featherdocs-io/src/latex.rs`) e a marca sai
+>> do modelo resultante (`featherdocs-core/src/modelo.rs`), não de olhar o código. Fonte dos trechos e dos critérios:
+>> `featherdocs/crates/featherdocs-io/dados/paridade_latex.txt`.
+>>
+>> Legenda: `[x]` o efeito do LaTeX aparece no modelo (estilo, bloco, cor, alinhamento…) · `[~]` parcial (reconhecido mas
+>> perde parte; ou reconhecido sem efeito visível; fórmula guardada como texto LaTeX limpo, sem montagem) · `[ ]` falta (o comando
+>> some, vira texto cru, o nome aparece no texto ou o modelo fica igual ao de um comando desconhecido).
+>> Referência de "certo": o PDF do `pdflatex`/Overleaf. Mede **amplitude**; fidelidade fina fica no fim.
+>>
+>> **Como refazer a medição** (a partir de `featherdocs/crates/featherdocs-io`, sob limite de memória):
+>> `systemd-run --user --scope -p MemoryMax=6G cargo run --example paridade_latex -- --saida ../../docs/PARIDADE-LATEX.md`
+>> (`--detalhe` explica cada marca; `--comparar docs/PARIDADE-LATEX.md` lista o que subiu ou desceu). Para marcar um item:
+>> melhore o leitor, rode de novo, e se o critério do item no arquivo de dados for fraco, acerte-o lá. Itens que o leitor não
+>> consegue medir (desenho, hifenização) levam marca fixa `=x`/`=~`/`= ` no arquivo de dados.
+>>
+>> Última medição: 15/10/2026. {{TOTAL}}
+>>
+>.
+>{{TABELA}}
+# Classes e opções do documento
+## Classes
+@cls article
+`article` — numeração de seção 1, 1.1 @@ \section{ZQX} @@ h:1
+@cls report
+`report` — `\chapter` com número de capítulo @@ \chapter{ZQX} @@ h:1&capnum
+@cls book
+`book` — `\chapter` e matter @@ \chapter{ZQX} @@ h:1
+`book` — `\frontmatter` (numeração romana, sem número de capítulo) @@ \frontmatter\chapter{ZQX} @@ semnumero
+`book` — `\mainmatter` (reinicia em arábico) @@ \mainmatter\chapter{ZQX} @@ h:1
+`book` — `\backmatter` @@ \backmatter\chapter{ZQX} @@ semnumero
+@cls letter
+`letter` — `\begin{letter}{destinatário}` @@ \begin{letter}{ZQX}\opening{Caro}Corpo\closing{Att}\end{letter} @@ txt:ZQX
+`letter` — `\opening` `\closing` `\signature` `\address` `\ps` `\cc` `\encl` `\name` @@ \begin{letter}{X}\opening{Caro}ZQX\closing{Att,}\cc{Y}\end{letter} @@ txt:Att
+@cls slides
+`slides` (classe de slides do LaTeX2e) @@ \begin{slide}ZQX\end{slide}
+@cls beamer
+`beamer` — `\begin{frame}` → slide (rota para FeatherSlide) @@ \begin{frame}{T}ZQX\end{frame} @@ txt:ZQX
+@cls article
+`proc`, `IEEEtran`, `revtex`, `llncs`, `svjour`, `elsarticle`, `acmart` (classes de periódico) @@ \documentclass{IEEEtran}ZQX
+`memoir` (classe de livro/artigo configurável) @@ \documentclass{memoir}\chapter{ZQX} @@ h:1
+`scrartcl` `scrreprt` `scrbook` (KOMA-Script) @@ \documentclass{scrartcl}\section{ZQX} @@ h:1
+`extarticle` `extreport` (corpo 8–20 pt, pacote `extsizes`) @@ \documentclass[14pt]{extarticle}ZQX @@ tam
+`abntex2` (classe ABNT) @@ \documentclass{abntex2}\chapter{ZQX} @@ h:1
+`standalone` (recorte de um trecho) @@ \documentclass{standalone}ZQX
+`moderncv` / `altacv` / `awesome-cv` (currículo) @@ \documentclass{moderncv}\cventry{2020}{Cargo}{Empresa}{}{}{ZQX} @@ txt:ZQX
+## Opções de classe
+`10pt` `11pt` `12pt` (corpo base) @@ \documentclass[12pt]{article}ZQX @@ tam
+`a4paper` `letterpaper` `a5paper` `b5paper` `legalpaper` `executivepaper` @@ \documentclass[letterpaper]{article}ZQX @@ carta
+`a5paper` @@ \documentclass[a5paper]{article}ZQX @@ a5
+`landscape` (paisagem) @@ \documentclass[landscape]{article}ZQX @@ paisagem
+`oneside` / `twoside` (margens de frente e verso) @@ \documentclass[twoside]{article}ZQX
+`onecolumn` / `twocolumn` (duas colunas) @@ \documentclass[twocolumn]{article}ZQX @@ =~
+`titlepage` / `notitlepage` (capa separada) @@ \documentclass[titlepage]{article}\title{T}\maketitle ZQX @@ qp
+`openright` / `openany` (capítulo abre em página ímpar) @@ \documentclass[openany]{report}\chapter{ZQX} @@ h:1
+`draft` / `final` @@ \documentclass[draft]{article}ZQX @@ ign
+`fleqn` (equações à esquerda) @@ \documentclass[fleqn]{article}$$ZQX$$ @@ =~
+`leqno` (número da equação à esquerda) @@ \documentclass[leqno]{article}\begin{equation}ZQX\end{equation} @@ =~
+`openbib` (bibliografia em formato aberto) @@ \documentclass[openbib]{article}ZQX @@ ign
+`@cls` opções globais passadas aos pacotes (`english,brazil`) @@ \documentclass[brazil,english]{article}\usepackage{babel}ZQX @@ ign
+## Preâmbulo e arquivo
+`\documentclass[opções]{classe}` @@ \documentclass[11pt,a4paper]{article}ZQX @@ ign
+`\usepackage[opções]{pacote}` (lista com vírgula) @@ \usepackage[utf8]{inputenc}\usepackage{amsmath,amssymb}ZQX @@ ign
+`\RequirePackage` @@ \RequirePackage{amsmath}ZQX @@ ign
+`\PassOptionsToPackage` @@ \PassOptionsToPackage{table}{xcolor}ZQX @@ ign
+`\begin{document}` … `\end{document}` @@ ZQX @@ ign
+`\AtBeginDocument` / `\AtEndDocument` @@ \AtBeginDocument{ZQX} @@ txt:ZQX
+`\input{arquivo}` — conteúdo de outro `.tex` @@ \input{outro}ZQX @@ sem:input
+`\include{arquivo}` — capítulo em outro `.tex` @@ \include{cap1}ZQX @@ sem:include
+`\includeonly{lista}` @@ \includeonly{cap1}ZQX @@ ign
+`\endinput` (para a leitura do arquivo) @@ ZQX\endinput depois @@ sem:depois
+`\stop` / `\end{document}` antes do fim (ignora o resto) @@ ZQX\end{document} depois @@ sem:depois
+`\newif` `\iftrue` `\iffalse` `\fi` (condicionais de preâmbulo) @@ \iffalse oculto\fi ZQX @@ sem:oculto
+`\listfiles` `\nofiles` `\batchmode` `\scrollmode` `\errorstopmode` `\nonstopmode` @@ \listfiles\nofiles ZQX @@ ign
+`\typeout{msg}` `\message{msg}` (só no terminal) @@ \typeout{msg}ZQX @@ ign&sem:msg
+`\write` `\immediate\write` (grava arquivo auxiliar) @@ \immediate\write18{ls}ZQX @@ ign
+`\jobname` @@ \jobname ZQX @@ ign
+`filecontents` / `filecontents*` (arquivo embutido) @@ \begin{filecontents*}{a.bib}@book{k,title={ZQX}}\end{filecontents*}texto @@ fonte
+`\newcommand{\texto}{…}` no preâmbulo e uso no corpo @@ \newcommand{\meu}{ZQX}\meu @@ exp:ZQX&sem:\meu
+# Divisões, título e sumário
+@cls report
+@pkg -
+## Divisões
+`\part{}` / `\part*{}` @@ \part{ZQX} @@ h:1
+`\chapter{}` (report/book) @@ \chapter{ZQX} @@ h:1
+`\chapter*{}` — sem número, mas aparece no corpo @@ \chapter*{ZQX} @@ h:1&semnumero
+@cls article
+`\section{}` @@ \section{ZQX} @@ h:1
+`\subsection{}` @@ \subsection{ZQX} @@ h:2
+`\subsubsection{}` @@ \subsubsection{ZQX} @@ h:3
+`\paragraph{}` (título de run-in) @@ \paragraph{ZQX} texto @@ txt:ZQX
+`\subparagraph{}` @@ \subparagraph{ZQX} texto @@ txt:ZQX
+`\section*{}` (sem número) @@ \section*{ZQX} @@ h:1&semnumero
+`\section[curto]{longo}` (título curto no sumário) @@ \section[curto]{ZQX} @@ h:1&sem:curto
+`\appendix` — seções viram A, B… @@ \appendix\section{ZQX} @@ h:1
+`\appendix` em `report`/`book` — capítulos viram Apêndice A @@ \appendix\chapter{ZQX} @@ h:1
+`\secnumdepth` / `\setcounter{secnumdepth}{n}` (profundidade de numeração) @@ \setcounter{secnumdepth}{1}\subsection{ZQX} @@ h:2&semnumero
+`\thesection` `\thesubsection` `\thechapter` (número como texto) @@ \section{A}Seção \thesection ZQX @@ txt:1
+`\addcontentsline{toc}{section}{}` (entrada manual no sumário) @@ \addcontentsline{toc}{section}{Extra}ZQX
+`\addtocontents{toc}{}` @@ \addtocontents{toc}{\protect\vspace{1cm}}ZQX
+`\markboth` `\markright` (cabeçalho corrente) @@ \markboth{A}{B}ZQX @@ ign
+## Título e resumo
+`\title{}` `\author{}` `\date{}` @@ \title{ZQX}\author{A}\date{B}\maketitle @@ titulo&autor
+`\maketitle` — bloco de título @@ \title{ZQX}\author{A}\maketitle @@ txt:ZQX
+`\and` entre autores @@ \title{T}\author{ZQX \and Outro}\maketitle @@ txt:Outro
+`\thanks{}` (nota do título) @@ \title{T}\author{A\thanks{ZQX}}\maketitle @@ marca:nota
+`\today` (data de hoje em pt-BR) @@ \today ZQX @@ sem:today
+`\date{\today}` / `\date{}` (sem data) @@ \title{T}\date{}\maketitle ZQX
+`titlepage` (ambiente de capa) @@ \begin{titlepage}ZQX\end{titlepage} @@ txt:ZQX
+`abstract` @@ \begin{abstract}ZQX\end{abstract} @@ txt:ZQX
+`\tableofcontents` @@ \tableofcontents @@ sum
+`\listoffigures` @@ \listoffigures @@ lof
+`\listoftables` @@ \listoftables @@ lot
+`\contentsname` `\listfigurename` `\listtablename` `\refname` `\bibname` `\abstractname` `\partname` `\chaptername` `\appendixname` `\figurename` `\tablename` `\indexname` @@ \contentsname ZQX
+`\setcounter{tocdepth}{n}` (níveis do sumário) @@ \setcounter{tocdepth}{2}\tableofcontents @@ sum
+`\newpage` @@ A\newpage ZQX @@ qp
+`\clearpage` @@ A\clearpage ZQX @@ qp
+`\cleardoublepage` (para página ímpar) @@ A\cleardoublepage ZQX @@ qp
+`\pagebreak[n]` / `\nopagebreak[n]` @@ A\pagebreak ZQX @@ qp
+`\FloatBarrier` (placeins) @@ \FloatBarrier ZQX @@ ign
+## Frente e verso, numeração
+`\pagenumbering{arabic}` @@ \pagenumbering{arabic}ZQX
+`\pagenumbering{roman}` / `Roman` @@ \pagenumbering{roman}ZQX @@ romano
+`\pagenumbering{alph}` / `Alph` / `gobble` @@ \pagenumbering{gobble}ZQX
+`\setcounter{page}{n}` @@ \setcounter{page}{5}ZQX
+`\pagestyle{empty}` @@ \pagestyle{empty}ZQX
+`\pagestyle{plain}` `headings` `myheadings` @@ \pagestyle{headings}ZQX
+`\thispagestyle{empty}` @@ \thispagestyle{empty}ZQX
+`\pagename` `\thepage` (número da página como texto) @@ ZQX \thepage @@ campo:pagina
+`\twocolumn[topo]` / `\onecolumn` (muda colunas no meio) @@ \twocolumn[ZQX] texto @@ txt:ZQX
+`\flushbottom` / `\raggedbottom` @@ \flushbottom ZQX @@ ign
+`\newpage` + `\null` página em branco @@ \null\newpage ZQX @@ qp
+`\mbox{}` vazio / `\leavevmode` @@ \leavevmode ZQX
+`\hrulefill` / `\dotfill` / `\hfill` @@ A\hfill ZQX
+`\clearemptydoublepage` (comum em livros) @@ \clearpage ZQX @@ qp
+# Referências cruzadas, notas e índices
+@cls article
+@pkg -
+## Referências
+`\label{}` + `\ref{}` (seção) @@ \section{A}\label{s}Veja \ref{s} ZQX @@ txt:1
+`\label{}` + `\ref{}` (figura, tabela, equação, item) @@ \begin{figure}\caption{X}\label{f}\end{figure}Veja \ref{f} ZQX @@ txt:1
+`\pageref{}` — número da página @@ \label{p}Na pág. \pageref{p} ZQX @@ campo:pagina
+`\eqref{}` (hyperref/amsmath) @@ \begin{equation}a\label{e}\end{equation}Ver \eqref{e} ZQX @@ txt:(1)
+`\autoref{}` (hyperref) — "Seção 2" @@ \section{A}\label{s}\autoref{s} ZQX @@ txt:Se
+@pkg hyperref
+`\nameref{}` (título da seção) @@ \section{Alvo}\label{s}\nameref{s} ZQX @@ txt:Alvo
+`\hyperref[label]{texto}` @@ \section{A}\label{s}\hyperref[s]{ZQX} @@ txt:ZQX
+`\hypertarget{}{}` / `\hyperlink{}{}` @@ \hypertarget{a}{alvo}\hyperlink{a}{ZQX} @@ txt:ZQX
+`\url{}` @@ \url{https://exemplo.com/ZQX} @@ link
+`\href{url}{texto}` @@ \href{https://x.org}{ZQX} @@ link
+`\href{mailto:}{}` @@ \href{mailto:a@b.c}{ZQX} @@ link
+`\hyperbaseurl` `\urlstyle` @@ \urlstyle{same}ZQX @@ ign
+`\phantomsection` @@ \phantomsection ZQX @@ ign
+`\texorpdfstring{}{}` @@ \section{\texorpdfstring{ZQX}{pdf}} @@ h:1&sem:pdf
+`\footnote{}` (hyperref `\footnote` clicável) @@ Texto\footnote{ZQX} @@ marca:nota
+`\pdfbookmark` `\bookmark` @@ \pdfbookmark[1]{X}{x}ZQX @@ ign
+@pkg -
+`\ref*` / `\autoref*` (sem link colorido) @@ \section{A}\label{s}\ref*{s}ZQX @@ txt:1
+`\label` em `\caption` @@ \begin{figure}\caption{A\label{k}}\end{figure}\ref{k} ZQX @@ txt:1
+`\label` em `enumerate` (`\item\label{}`) @@ \begin{enumerate}\item\label{k}A\end{enumerate}\ref{k}ZQX @@ txt:1
+`\label` em `theorem` / `proof` @@ \newtheorem{teo}{Teorema}\begin{teo}\label{k}A\end{teo}\ref{k}ZQX @@ txt:1
+`\ref` para referência não definida ("??") @@ \ref{nada} ZQX @@ txt:??
+@pkg varioref
+`\vref{}` — "seção 2 na página 3" @@ \section{A}\label{s}\vref{s} ZQX @@ txt:1
+`\vpageref{}` @@ \label{p}\vpageref{p} ZQX
+`\vrefrange{}{}` @@ \section{A}\label{a}\section{B}\label{b}\vrefrange{a}{b} ZQX @@ txt:1
+@pkg cleveref
+`\cref{}` — "seção 2" @@ \section{A}\label{s}\cref{s} ZQX @@ txt:Se
+`\Cref{}` (maiúscula) @@ \section{A}\label{s}\Cref{s} ZQX @@ txt:Se
+`\cref{a,b}` / `\crefrange{a}{b}` (lista) @@ \section{A}\label{a}\section{B}\label{b}\crefrange{a}{b} ZQX @@ txt:1
+`\cpageref{}` @@ \label{p}\cpageref{p} ZQX
+`\labelcref{}` @@ \section{A}\label{s}\labelcref{s} ZQX @@ txt:1
+`\crefname{}{}{}` (nome do tipo em pt-BR) @@ \crefname{section}{seção}{seções}\section{A}\label{s}\cref{s} ZQX @@ txt:seção
+@pkg -
+## Notas
+`\footnote{}` — nota de rodapé numerada @@ A\footnote{ZQX} @@ marca:nota
+`\footnote[n]{}` — número forçado @@ A\footnote[7]{ZQX} @@ marca:nota
+`\footnotemark` + `\footnotetext{}` @@ A\footnotemark B\footnotetext{ZQX} @@ marca:nota
+`\thanks{}` fora do título @@ A\thanks{ZQX} @@ marca:nota
+`\footnote` dentro de tabela, `minipage`, título (`\protect`) @@ \section{A\protect\footnote{ZQX}} @@ marca:nota
+`\footnote` dentro de `\caption` / `\fbox` @@ \fbox{A\footnote{ZQX}} @@ marca:nota
+`\endnote{}` + `\theendnotes` (`endnotes`) @@ \usepackage{endnotes}A\endnote{ZQX} @@ marca:nota
+`\thefootnote` / `\renewcommand{\thefootnote}{\fnsymbol{footnote}}` @@ \renewcommand{\thefootnote}{\fnsymbol{footnote}}A\footnote{ZQX} @@ marca:nota
+`\fnsymbol{}` `\arabic{}` `\roman{}` `\Roman{}` `\alph{}` `\Alph{}` (numeração de contador) @@ \fnsymbol{footnote} ZQX
+`\footnoterule` `\footnotesep` `\skip\footins` @@ \renewcommand{\footnoterule}{}A\footnote{X}ZQX @@ marca:nota
+`\marginpar{}` (nota na margem) @@ A\marginpar{ZQX} @@ txt:ZQX
+`\marginparwidth` `\marginparsep` `\reversemarginpar` @@ \reversemarginpar A\marginpar{ZQX} @@ txt:ZQX
+`\sidenote` / `\marginnote` (`sidenotes`/`marginnote`) @@ \usepackage{marginnote}A\marginnote{ZQX} @@ txt:ZQX
+`\mpfootnote` (nota em `minipage`) @@ \begin{minipage}{5cm}A\footnote{ZQX}\end{minipage} @@ marca:nota
+@pkg footmisc
+`footmisc` — `bottom` `perpage` `symbol` `stable` `hang` `multiple` @@ A\footnote{ZQX} @@ marca:nota
+`\footnote` repetida com `\footref{}` @@ A\footnote{X}\label{f} B\footref{f} ZQX @@ txt:ZQX
+## Índices e glossários
+@pkg makeidx
+`\makeindex` + `\index{termo}` @@ \makeindex Texto\index{ZQX} @@ marca:indice
+`\index{termo!subtermo}` @@ Texto\index{A!ZQX} @@ marca:indice
+`\index{termo@forma|textbf}` (ordem e formato) @@ Texto\index{ZQX@Zqx|textbf} @@ marca:indice
+`\index{termo|see{outro}}` @@ Texto\index{ZQX|see{outro}} @@ marca:indice
+`\index{termo|(}` … `\index{termo|)}` (intervalo) @@ \index{ZQX|(}texto\index{ZQX|)} @@ marca:indice
+`\printindex` @@ \makeindex\printindex @@ idx
+`\printindex[nome]` (`imakeidx`, vários índices) @@ \usepackage{imakeidx}\makeindex[name=a]\printindex[a] @@ idx
+`\indexspace` `\indexentry` `\see` `\seealso` @@ \index{x|seealso{y}}ZQX @@ marca:indice
+@pkg glossaries
+`\makeglossaries` + `\newglossaryentry{}{name,description}` @@ \makeglossaries\newglossaryentry{k}{name={ZQX},description={d}}\gls{k} @@ txt:ZQX
+`\gls{}` `\Gls{}` `\glspl{}` `\glsdesc{}` `\glssymbol{}` @@ \makeglossaries\newglossaryentry{k}{name={ZQX},description={d}}\glspl{k} @@ txt:ZQX
+`\printglossary` / `\printglossaries` @@ \makeglossaries\printglossaries ZQX @@ ign
+`\newacronym{}{}{}` + `\gls` (primeira vez por extenso) @@ \makeglossaries\newacronym{k}{ZQX}{Longo}\gls{k} @@ txt:Longo
+`\glsresetall` `\glsunset` `\acrshort` `\acrlong` `\acrfull` @@ \makeglossaries\newacronym{k}{ZQX}{Longo}\acrshort{k} @@ txt:ZQX
+@pkg acro
+`acro`: `\DeclareAcronym{}{short=,long=}` + `\ac{}` @@ \DeclareAcronym{k}{short=ZQX,long=Longo}\ac{k} @@ txt:Longo
+`\printacronyms` / `\acs` `\acl` `\acf` `\acp` @@ \DeclareAcronym{k}{short=ZQX,long=Longo}\acs{k} @@ txt:ZQX
+@pkg acronym
+`acronym`: `\acro{}[]{}` `\ac{}` `\acf{}` + ambiente `acronym` @@ \acro{k}[ZQX]{Longo}\ac{k} @@ txt:Longo
+@pkg nomencl
+`\nomenclature{}{}` + `\printnomenclature` @@ \makenomenclature\nomenclature{a}{ZQX}\printnomenclature @@ txt:ZQX
+@pkg -
+`\listofalgorithms` / `\listoflistings` (lista de códigos) @@ \listoflistings ZQX
+`\tableofcontents*` (sem entrada de si mesmo) @@ \tableofcontents* @@ sum
+`\addcontentsline` p/ bibliografia e lista (ABNT) @@ \addcontentsline{toc}{chapter}{Bibliografia}ZQX
+# Texto, fontes e estilos
+@cls article
+@pkg -
+## Estilos de fonte (comandos com argumento)
+`\textbf{}` @@ \textbf{ZQX} @@ b
+`\textit{}` @@ \textit{ZQX} @@ i
+`\textsl{}` (inclinado) @@ \textsl{ZQX} @@ i
+`\emph{}` @@ \emph{ZQX} @@ i
+`\emph` dentro de itálico (volta a romano) @@ \textit{a \emph{ZQX}} @@ sem:\emph
+`\texttt{}` @@ \texttt{ZQX} @@ tt
+`\textsf{}` @@ \textsf{ZQX} @@ sf
+`\textrm{}` @@ \textrm{ZQX}
+`\textmd{}` / `\textup{}` / `\textnormal{}` @@ \textbf{a \textmd{ZQX}} @@ txt:ZQX
+`\textsc{}` (versalete) @@ \textsc{ZQX} @@ txt:ZQX&sem:\textsc
+`\textsuperscript{}` @@ \textsuperscript{ZQX} @@ sup
+`\textsubscript{}` @@ \textsubscript{ZQX} @@ sub
+`\underline{}` @@ \underline{ZQX} @@ u
+`\mbox{}` / `\hbox{}` @@ \mbox{ZQX} @@ txt:ZQX
+`\texorpdfstring{}{}` @@ \texorpdfstring{ZQX}{p} @@ txt:ZQX&sem:p
+`\textcolor{cor}{texto}` @@ \usepackage{xcolor}\textcolor{red}{ZQX} @@ cor
+`\textsf{\bfseries …}` combinados @@ \textsf{\bfseries ZQX} @@ b&sf
+## Estilos de fonte (declarações)
+`\bfseries` @@ {\bfseries ZQX} @@ b
+`\mdseries` @@ \textbf{a {\mdseries ZQX}} @@ txt:ZQX
+`\itshape` @@ {\itshape ZQX} @@ i
+`\slshape` @@ {\slshape ZQX} @@ i
+`\scshape` (versalete) @@ {\scshape ZQX} @@ txt:ZQX&sem:scshape
+`\upshape` @@ \textit{a {\upshape ZQX}} @@ txt:ZQX
+`\ttfamily` @@ {\ttfamily ZQX} @@ tt
+`\sffamily` @@ {\sffamily ZQX} @@ sf
+`\rmfamily` @@ {\rmfamily ZQX}
+`\normalfont` @@ \textbf{a {\normalfont ZQX}} @@ txt:ZQX
+`\bf` `\it` `\tt` `\sf` `\rm` `\sc` `\sl` (antigos, em grupo) @@ {\bf ZQX} @@ b
+`\em` (declaração de ênfase) @@ {\em ZQX} @@ i
+`\emph` e `\em` em ambientes (`theorem` em itálico) @@ \begin{quote}\em ZQX\end{quote} @@ i
+`\DeclareTextFontCommand` / `\newcommand{\negrito}[1]{\textbf{#1}}` @@ \newcommand{\neg}[1]{\textbf{#1}}\neg{ZQX} @@ b
+## Tamanhos
+`\tiny` @@ {\tiny ZQX} @@ tam
+`\scriptsize` @@ {\scriptsize ZQX} @@ tam
+`\footnotesize` @@ {\footnotesize ZQX} @@ tam
+`\small` @@ {\small ZQX} @@ tam
+`\normalsize` @@ {\normalsize ZQX} @@ ign
+`\large` @@ {\large ZQX} @@ tam
+`\Large` @@ {\Large ZQX} @@ tam
+`\LARGE` @@ {\LARGE ZQX} @@ tam
+`\huge` @@ {\huge ZQX} @@ tam
+`\Huge` @@ {\Huge ZQX} @@ tam
+`\fontsize{}{}\selectfont` @@ {\fontsize{20}{24}\selectfont ZQX} @@ tam
+`\fontseries` `\fontshape` `\fontfamily` `\fontencoding` + `\selectfont` @@ {\fontfamily{phv}\selectfont ZQX} @@ sf
+`\relsize{}` / `\larger` `\smaller` (`relsize`) @@ \usepackage{relsize}\larger[2]ZQX @@ tam
+`\resizebox{}{}{}` (texto) @@ \usepackage{graphicx}\resizebox{3cm}{!}{ZQX} @@ txt:ZQX
+`\scalebox{}{}` @@ \usepackage{graphicx}\scalebox{2}{ZQX} @@ txt:ZQX
+`\rotatebox{}{}` @@ \usepackage{graphicx}\rotatebox{90}{ZQX} @@ txt:ZQX
+`\mathversion` / `\boldmath` (texto em fórmula) @@ \boldmath $ZQX$ @@ =~
+## Famílias e pacotes de fonte
+`\usepackage{lmodern}` (Latin Modern) @@ \usepackage{lmodern}ZQX @@ ign
+`\usepackage[T1]{fontenc}` @@ \usepackage[T1]{fontenc}ZQX @@ ign
+`\usepackage[utf8]{inputenc}` @@ \usepackage[utf8]{inputenc}Ação ZQX @@ txt:Ação
+`\usepackage[latin1]{inputenc}` `\inputencoding` @@ \usepackage[latin1]{inputenc}ZQX @@ ign
+`times` / `mathptmx` / `newtxtext` (Times) @@ \usepackage{times}ZQX @@ sf
+`helvet` + `\renewcommand{\familydefault}{\sfdefault}` @@ \usepackage{helvet}\renewcommand{\familydefault}{\sfdefault}ZQX @@ sf
+`palatino` / `mathpazo` / `newpxtext` @@ \usepackage{palatino}ZQX
+`bookman` `charter` `utopia` `fourier` `libertine` `kpfonts` `concrete` `cmbright` @@ \usepackage{charter}ZQX
+`avant` `courier` `tgtermes` `tgheros` `tgcursor` `tgpagella` @@ \usepackage{courier}ZQX
+`fontspec` — `\setmainfont{}` `\setsansfont{}` `\setmonofont{}` (XeLaTeX/LuaLaTeX) @@ \usepackage{fontspec}\setmainfont{Arial}ZQX
+`fontspec` — `\fontspec{}` / `\newfontfamily` @@ \usepackage{fontspec}\newfontfamily\ff{Arial}{\ff ZQX} @@ txt:ZQX
+`unicode-math` (`\setmathfont`) @@ \usepackage{unicode-math}\setmathfont{XITS Math}ZQX
+`\usepackage{microtype}` (ajuste micro-tipográfico) @@ \usepackage{microtype}ZQX @@ ign
+`\usepackage{setspace}` — ver seção de espaçamento @@ \usepackage{setspace}ZQX @@ ign
+`\DeclareMathAlphabet` `\DeclareFontFamily` `\DeclareFontShape` @@ \DeclareFontFamily{T1}{foo}{}ZQX @@ ign
+`\usepackage{textcomp}` (símbolos de texto) @@ \usepackage{textcomp}\texteuro ZQX @@ txt:€
+`\usepackage{babel}` e fontes de idioma @@ \usepackage[brazil]{babel}ZQX
+`\usepackage[scaled]{helvet}` (escala) @@ \usepackage[scaled]{helvet}ZQX
+`\usepackage{anyfontsize}` / `type1ec` / `cm-super` @@ \usepackage{cm-super}ZQX @@ ign
+## Ênfase estendida (ulem, soul, outros)
+@pkg ulem
+`\uline{}` `\uuline{}` `\uwave{}` @@ \uline{ZQX} @@ u
+`\sout{}` (tachado) @@ \sout{ZQX} @@ s
+`\xout{}` (rasurado) @@ \xout{ZQX} @@ s
+`\dashuline{}` `\dotuline{}` @@ \dashuline{ZQX} @@ u
+`\normalem` (restaura `\emph`) @@ \normalem\emph{ZQX} @@ i
+@pkg soul
+`\hl{}` (realce) @@ \hl{ZQX} @@ realce
+`\ul{}` (sublinhado do soul) @@ \ul{ZQX} @@ u
+`\st{}` (tachado do soul) @@ \st{ZQX} @@ s
+`\so{}` (espaçado) / `\caps{}` / `\sethlcolor{}` @@ \sethlcolor{yellow}\hl{ZQX} @@ realce
+@pkg xcolor
+`\colorbox{cor}{texto}` @@ \colorbox{yellow}{ZQX} @@ realce
+`\fcolorbox{borda}{fundo}{texto}` @@ \fcolorbox{red}{yellow}{ZQX} @@ realce
+@pkg -
+`\textbf` com acentos e `\'{}` dentro @@ \textbf{Ação ZQX} @@ b
+`\textit{\textbf{}}` aninhados @@ \textit{\textbf{ZQX}} @@ b&i
+`\texttt{}` com `\_` `\#` `\%` `\&` escapados @@ \texttt{a\_b ZQX} @@ tt&txt:a_b
+`\verb|…|` e `\verb*|…|` @@ \verb|ZQX| @@ tt
+`\url{}` com `%` e `#` dentro @@ \usepackage{url}\url{http://a.b/%20#ZQX} @@ txt:ZQX
+# Símbolos de texto, acentos e caracteres
+@cls article
+@pkg -
+## Acentos e letras especiais
+`\'` `\`` `\^` `\"` `\~` `\=` `\.` (acentos agudo, grave, circunflexo, trema, til, macro, ponto) @@ ZQX \'a \`a \^a \"a \~a @@ txt:áàâäã
+`\u{}` `\v{}` `\H{}` `\r{}` `\k{}` (breve, caron, trema húngaro, anel, ogonek) @@ ZQX \u{a} \v{c} \H{o} \r{a} \k{a} @@ txt:ăčőåą
+`\c{}` (cedilha) `\d{}` `\b{}` `\t{}` (ponto embaixo, barra, tie) @@ ZQX \c{c} \d{a} \b{a} @@ txt:ç
+`\'{a}` com chaves e `\'\i` (i sem ponto) @@ ZQX \'{a} \'\i @@ txt:áí
+`\i` `\j` (i e j sem ponto) @@ ZQX \^\i \"\i @@ txt:îï
+`\ae` `\AE` `\oe` `\OE` `\aa` `\AA` @@ ZQX \ae \AE \oe \OE \aa \AA @@ txt:æÆœŒåÅ
+`\o` `\O` `\l` `\L` `\ss` `\SS` @@ ZQX \o \O \l \L \ss @@ txt:øØłŁß
+`\dh` `\DH` `\th` `\TH` `\ng` `\NG` `\dj` `\DJ` (T1) @@ ZQX \dh \th @@ txt:ðþ
+`\~{n}` ñ e `\"{u}` ü (compostos) @@ ZQX \~{n} \"{u} @@ txt:ñü
+Letras acentuadas em UTF-8 direto (`ção`, `é`, `ü`) @@ ZQX ação éü @@ txt:ação
+## Pontuação, aspas e travessões
+`--` (en dash) e `---` (em dash) @@ ZQX 1--2 e a---b @@ txt:1–2
+`` `` `` e `''` (aspas duplas inglesas) @@ ZQX ``aspas'' @@ txt:“aspas”
+`` ` `` e `'` (aspas simples) @@ ZQX `a' @@ txt:‘a’
+`\glqq` `\grqq` `\flqq` `\frqq` `\guillemotleft` `\guillemotright` `\quotedblbase` (babel) @@ ZQX \guillemotleft x\guillemotright @@ txt:«
+`\enquote{}` / `\textquote` (csquotes) @@ \usepackage{csquotes}\enquote{ZQX} @@ txt:“
+`\mkbibquote` `\blockquote` `\foreignquote` @@ \usepackage{csquotes}\blockquote{ZQX} @@ cit
+`\ldots` `\dots` `\textellipsis` `\cdots` @@ ZQX\ldots @@ txt:…
+`\!` `!`` ``?`` (pontos invertidos `¡ ¿`) @@ ZQX !` ?` @@ txt:¡¿
+`\-` (ponto de hifenização) e `\hyphenation{}` @@ ZQX hifeni\-zação @@ txt:hifenização
+`\nobreakdash-` `\textendash` `\textemdash` @@ ZQX \textendash \textemdash @@ txt:–—
+`\textquoteleft` `\textquoteright` `\textquotedblleft` `\textquotedblright` @@ ZQX \textquotedblleft x\textquotedblright @@ txt:“x”
+`\textquotesingle` `\textasciigrave` `\textquotedbl` @@ ZQX \textquotesingle @@ txt:'
+`\guilsinglleft` `\guilsinglright` `\quotesinglbase` @@ ZQX \guilsinglleft @@ txt:‹
+## Caracteres reservados
+`\%` `\$` `\&` `\#` `\_` `\{` `\}` (escapados) @@ ZQX \% \$ \& \# \_ \{ \} @@ txt:%
+`\textbackslash` `\textasciitilde` `\textasciicircum` `\textbar` `\textless` `\textgreater` @@ ZQX \textbackslash \textasciitilde \textbar @@ txt:\\
+`\slash` (barra que permite quebra) @@ ZQX a\slash b @@ txt:a/b
+`~` (espaço que não quebra) @@ ZQX a~b @@ txt:a b
+`\ ` (espaço depois de comando) e `\@` (fim de frase) @@ ZQX Sr.\ Silva e Fim\@. @@ txt:Sr. Silva
+`\frenchspacing` / `\nonfrenchspacing` @@ \frenchspacing ZQX @@ ign
+`\obeylines` `\obeyspaces` @@ ZQX @@ ign
+## Símbolos de texto (textcomp / padrão)
+`\textcopyright` `\copyright` `\textregistered` `\texttrademark` `\textcircledP` @@ ZQX \textcopyright \textregistered \texttrademark @@ txt:©®™
+`\S` `\P` (seção e parágrafo) `\dag` `\ddag` `\textdagger` `\textdaggerdbl` @@ ZQX \S \P \dag \ddag @@ txt:§¶†‡
+`\pounds` `\textsterling` `\texteuro` `\yen` `\textyen` `\textdollar` `\textcent` `\textcurrency` @@ \usepackage{textcomp}ZQX \pounds \texteuro \textyen @@ txt:£€¥
+`\euro` / `eurosym`: `\EUR{}` `\euro` @@ \usepackage{eurosym}ZQX \euro @@ txt:€
+`\textdegree` `\textcelsius` `\textohm` `\textmu` `\textperthousand` `\textpertenthousand` @@ \usepackage{textcomp}ZQX \textdegree \textmu @@ txt:°µ
+`\textpm` `\texttimes` `\textdiv` `\textonehalf` `\textonequarter` `\textthreequarters` `\textminus` @@ \usepackage{textcomp}ZQX \textpm \texttimes \textonehalf @@ txt:±×½
+`\textordfeminine` `\textordmasculine` (ª º) @@ ZQX \textordfeminine \textordmasculine @@ txt:ªº
+`\textbullet` `\textperiodcentered` `\textasteriskcentered` `\textparagraph` `\textsection` @@ ZQX \textbullet \textperiodcentered @@ txt:•·
+`\textless` `\textgreater` `\textleftarrow` `\textrightarrow` `\textuparrow` `\textdownarrow` @@ \usepackage{textcomp}ZQX \textrightarrow \textleftarrow @@ txt:→←
+`\textnumero` `\textreferencemark` `\textcolonmonetary` `\textlira` `\textnaira` `\textwon` `\textbaht` @@ \usepackage{textcomp}ZQX \textnumero @@ txt:№
+`\textflorin` `\textlnot` `\textbrokenbar` `\textlozenge` `\textinterrobang` `\textborn` `\textdied` @@ \usepackage{textcomp}ZQX \textlnot @@ txt:¬
+`\checkmark` `\ding{}` (`pifont`) `\cmark` `\xmark` @@ \usepackage{pifont}ZQX \ding{51} @@ txt:✓
+`\ldots` em modo texto e `\textellipsis` @@ ZQX \textellipsis @@ txt:…
+`\ensuremath{}` (símbolo que funciona em texto e fórmula) @@ ZQX \ensuremath{\alpha} @@ m
+`\ss{}` `\i{}` e outros "com chaves vazias" para colar texto @@ ZQX Stra\ss{}e @@ txt:Straße
+`\char"41` `\symbol{65}` `\textunicode`/`\unichar` (código de caractere) @@ ZQX \symbol{65} \char65 @@ txt:A
+`\today` com `babel` (data por extenso pt-BR) @@ \usepackage[brazil]{babel}ZQX \today @@ sem:today
+`\datebrazil` `\dateenglish` `\selectlanguage{}` `\foreignlanguage{}{}` (babel) @@ \usepackage[brazil,english]{babel}\foreignlanguage{english}{ZQX} @@ txt:ZQX
+`\textgreek{}` `\textcyrillic{}` `\begin{otherlanguage}` (babel) @@ \usepackage[english,brazil]{babel}\begin{otherlanguage}{english}ZQX\end{otherlanguage} @@ txt:ZQX
+`\begin{hyphenrules}{}`, `\babelhyphenation{}` @@ \usepackage[brazil]{babel}\babelhyphenation{ZQX} @@ ign
+`\selectlanguage{brazil}` e textos fixos ("Sumário", "Figura") @@ \usepackage[brazil]{babel}\tableofcontents @@ sum
+`\captionsbrazil` / `\addto\captionsbrazil{\renewcommand{\figurename}{Fig.}}` @@ \usepackage[brazil]{babel}\addto\captionsbrazil{\renewcommand{\figurename}{Fig.}}ZQX
+## Símbolos diversos
+`\LaTeX` `\TeX` `\LaTeXe` `\XeTeX` `\BibTeX` (logos) @@ ZQX \LaTeX \TeX \LaTeXe @@ txt:LaTeX
+`\ding{}` / `pifont` (dingbats) @@ \usepackage{pifont}ZQX \ding{52} @@ txt:✔
+`\faIcon{}` (`fontawesome5`) @@ \usepackage{fontawesome5}ZQX \faGithub
+`\texttildelow` `\textbardbl` `\textcircled{}` `\textcircled{a}` (a em círculo) @@ ZQX \textcircled{a} @@ txt:ⓐ
+`\ding{172}` números em círculo `\textcircled{1}` @@ ZQX \textcircled{1} @@ txt:①
+`\perthousand` (mille) `\micro` `\celsius` `\ohm` `\degree` (gensymb) @@ \usepackage{gensymb}ZQX \degree \celsius \micro @@ txt:°℃µ
+`\SI{}{}` `\num{}` (siunitx) como símbolo de texto @@ \usepackage{siunitx}\SI{10}{\meter} ZQX @@ txt:10
+# Espaços, quebras, alinhamento e comprimentos
+@cls article
+@pkg -
+## Quebras de linha e parágrafo
+`\\` (quebra de linha) @@ A\\ZQX @@ txt:ZQX
+`\\[2pt]` / `\\*` (com espaço extra, sem quebra de página) @@ A\\[5pt]ZQX @@ sem:[5pt]
+`\newline` @@ A\newline ZQX @@ sem:newline
+`\linebreak[n]` `\nolinebreak[n]` @@ A\linebreak ZQX @@ sem:linebreak
+`\par` e linha em branco (parágrafo novo) @@ A\par ZQX @@ nblocos2
+`\noindent` @@ \noindent ZQX @@ sem:noindent
+`\indent` (força recuo) @@ \indent ZQX
+`\parindent` — `\setlength{\parindent}{1cm}` @@ \setlength{\parindent}{1cm}A⏎⏎ZQX @@ primeira
+`\parskip` — `\setlength{\parskip}{6pt}` @@ \setlength{\parskip}{6pt}A⏎⏎ZQX @@ antes
+`\sloppy` / `\fussy` / `\emergencystretch` @@ \sloppy ZQX @@ ign
+`\hyphenpenalty` `\tolerance` `\exhyphenpenalty` `\hbadness` `\vbadness` `\clubpenalty` `\widowpenalty` @@ \widowpenalty=10000 ZQX @@ ign
+`\mbox{}` impede quebra · `\nobreak` · `\nolinebreak` @@ \mbox{ZQX a} @@ txt:ZQX
+`\unskip` `\ignorespaces` `\relax` `\null` `\protect` @@ A\relax ZQX @@ sem:relax
+`\obeylines`, `\\` em `\parbox` e células @@ \parbox{3cm}{A\\ZQX} @@ txt:ZQX
+## Alinhamento
+`\centering` @@ \centering ZQX @@ centro
+`center` @@ \begin{center}ZQX\end{center} @@ centro
+`flushleft` / `\raggedright` @@ \begin{flushleft}ZQX\end{flushleft} @@ esq
+`flushright` / `\raggedleft` @@ \begin{flushright}ZQX\end{flushright} @@ dir
+`\raggedright` (declaração) @@ \raggedright ZQX @@ esq
+`\raggedleft` (declaração) @@ \raggedleft ZQX @@ dir
+`\justifying` (`ragged2e`) / `\Centering` `\RaggedRight` `\RaggedLeft` @@ \usepackage{ragged2e}\RaggedRight ZQX @@ esq
+`justify` (ambiente `ragged2e`) @@ \usepackage{ragged2e}\begin{justify}ZQX\end{justify} @@ just
+`\hfil` `\hfill` `\hfilll` (cola elástica horizontal) @@ A\hfill ZQX @@ sem:hfill
+`\hss` `\hskip` `\kern` `\mkern` `\mskip` @@ A\hskip 1cm ZQX @@ sem:hskip
+`\leftskip` `\rightskip` `\parfillskip` `\@rightskip` @@ ZQX @@ ign
+`\leftmargin`/`\rightmargin` em listas e `\leftskip` em parágrafo @@ {\leftskip=1cm ZQX} @@ recuo
+## Espaço horizontal e vertical
+`\hspace{}` `\hspace*{}` @@ A\hspace{1cm}ZQX @@ sem:hspace
+`\vspace{}` `\vspace*{}` (inclusive negativo) @@ A\vspace{1cm}ZQX @@ sem:vspace
+`\quad` `\qquad` `\enspace` `\thinspace` `\negthinspace` @@ A\quad B\qquad ZQX @@ sem:quad
+`\,` `\:` `\;` `\!` `\ ` (espaços finos) @@ A\,B\;ZQX @@ sem:\,
+`\smallskip` `\medskip` `\bigskip` @@ A\bigskip ZQX @@ sem:bigskip
+`\vfill` `\vfil` `\vss` @@ A\vfill ZQX @@ sem:vfill
+`\addvspace` `\addpenalty` `\vskip` `\vphantom` @@ A\vskip 1cm ZQX @@ sem:vskip
+`\phantom{}` `\hphantom{}` `\vphantom{}` @@ A\phantom{oculto}ZQX @@ sem:oculto
+`\strut` `\rule{}{}` (régua cheia com largura/altura) @@ A\rule{2cm}{1pt}ZQX @@ reg
+`\rule[raise]{w}{h}` / `\hrulefill` / `\dotfill` @@ A\dotfill ZQX @@ sem:dotfill
+`\hrule` / `\vrule` @@ \hrule ZQX @@ reg
+`\noindent\rule{\textwidth}{0.4pt}` (linha cheia) @@ \noindent\rule{\textwidth}{0.4pt}ZQX @@ reg
+`\leaders\hrule\hfill` `\xleaders` `\cleaders` @@ \leaders\hrule\hfill ZQX
+`\raisebox{}{}` @@ A\raisebox{2pt}{ZQX} @@ txt:ZQX
+`\lower` `\raise` `\moveleft` `\moveright` @@ \raise 2pt\hbox{ZQX} @@ txt:ZQX
+`\enlargethispage{}` @@ \enlargethispage{2cm}ZQX @@ ign
+## Comprimentos e unidades
+`\setlength{\len}{valor}` @@ \newlength{\a}\setlength{\a}{2cm}ZQX @@ ign
+`\addtolength` `\settowidth` `\settoheight` `\settodepth` @@ \newlength{\a}\settowidth{\a}{abc}ZQX @@ ign
+`\newlength` `\the\len` @@ \newlength{\a}ZQX @@ ign
+Unidades `pt` `bp` `mm` `cm` `in` `pc` `dd` `cc` `sp` `em` `ex` `mu` @@ \hspace{1in}ZQX @@ sem:hspace
+Comprimentos elásticos `plus` / `minus` (`1em plus 0.5em minus 0.2em`) @@ \hspace{1em plus 1fill}ZQX @@ sem:plus
+`\textwidth` `\linewidth` `\columnwidth` `\paperwidth` `\textheight` `\paperheight` @@ \hspace{0.5\textwidth}ZQX @@ sem:textwidth
+`\baselineskip` `\baselinestretch` `\lineskip` `\lineskiplimit` @@ \setlength{\baselineskip}{20pt}ZQX
+`\parsep` `\itemsep` `\topsep` `\partopsep` `\labelsep` `\labelwidth` `\leftmargin` @@ \setlength{\itemsep}{0pt}\begin{itemize}\item ZQX\end{itemize} @@ item
+`\evensidemargin` `\oddsidemargin` `\topmargin` `\headheight` `\headsep` `\footskip` `\marginparwidth` @@ \setlength{\oddsidemargin}{1cm}ZQX @@ margem
+`\textwidth` alterado com `\setlength{\textwidth}{16cm}` @@ \setlength{\textwidth}{12cm}ZQX @@ margem
+`\hoffset` `\voffset` `\columnsep` `\columnseprule` `\arrayrulewidth` `\tabcolsep` `\arraycolsep` `\fboxsep` `\fboxrule` @@ \setlength{\fboxsep}{5pt}\fbox{ZQX} @@ borda
+`\dimexpr` / `\glueexpr` / `\numexpr` `\fpeval` @@ \hspace{\dimexpr 1cm+2mm\relax}ZQX @@ sem:dimexpr
+`\totalheight` `\height` `\width` `\depth` (em `\makebox`/`\raisebox`) @@ \makebox[\width]{ZQX} @@ txt:ZQX
+`\@` e `\ensuremath` em unidades de comprimento do `calc` (`\widthof` `\heightof` `\depthof` `\totalheightof`) @@ \usepackage{calc}\setlength{\parindent}{\widthof{abc}}A⏎⏎ZQX @@ primeira
+## Espaçamento entre linhas
+`\linespread{1.5}` @@ \linespread{1.5}A⏎⏎ZQX @@ entrelinha
+@pkg setspace
+`\onehalfspacing` @@ \onehalfspacing A⏎⏎ZQX @@ entrelinha
+`\doublespacing` @@ \doublespacing A⏎⏎ZQX @@ entrelinha
+`\singlespacing` @@ \singlespacing ZQX @@ ign
+`\setstretch{1.2}` @@ \setstretch{1.2} A⏎⏎ZQX @@ entrelinha
+`spacing` (ambiente) / `singlespace` / `onehalfspace` / `doublespace` @@ \begin{spacing}{2}ZQX\end{spacing} @@ entrelinha
+`\setSingleSpace` `\SetSinglespace` `\vspace{\baselineskip}` @@ \vspace{\baselineskip}ZQX @@ sem:baselineskip
+@pkg parskip
+`parskip` — parágrafos sem recuo e com espaço entre eles @@ A⏎⏎ZQX @@ antes
+`\setlength{\parskip}{\baselineskip}` @@ \setlength{\parskip}{\baselineskip}A⏎⏎ZQX @@ antes
+@pkg indentfirst
+`indentfirst` — recuo também no primeiro parágrafo @@ \section{S}ZQX @@ primeira
+@pkg -
+## Página e margens
+@pkg geometry
+`\usepackage[a4paper,margin=2.5cm]{geometry}` @@ ZQX @@ margem
+`geometry`: `left=` `right=` `top=` `bottom=` `margin=` `inner=` `outer=` @@ \geometry{left=3cm,right=2cm,top=3cm,bottom=2cm}ZQX @@ margem
+`geometry`: `landscape` `paperwidth=` `paperheight=` `papersize=` @@ \geometry{landscape}ZQX @@ paisagem
+`geometry`: `letterpaper` @@ \geometry{letterpaper}ZQX @@ carta
+`geometry`: `a5paper` @@ \geometry{a5paper}ZQX @@ a5
+`geometry`: `twoside` `bindingoffset` `headheight` `footskip` `includehead` `includefoot` `heightrounded` `showframe` @@ \geometry{bindingoffset=1cm}ZQX
+`\newgeometry{}` / `\restoregeometry` (muda no meio) @@ ZQX \newgeometry{margin=1cm} outro @@ txt:ZQX
+@pkg vmargin
+`\setmarginsrb` (`vmargin`) @@ \setmarginsrb{3cm}{3cm}{3cm}{3cm}{0pt}{0pt}{0pt}{0pt}ZQX @@ margem
+@pkg -
+`\paperwidth` / `\setlength{\paperwidth}{…}` @@ \setlength{\paperwidth}{15cm}ZQX @@ margem
+`\pdfpagewidth` `\pdfpageheight` `\pdfminorversion` `\pdfcompresslevel` @@ \pdfpagewidth=15cm ZQX
+@pkg lscape
+`lscape` — `landscape` (ambiente, página girada) @@ \begin{landscape}ZQX\end{landscape} @@ txt:ZQX
+@pkg pdflscape
+`pdflscape` — página em paisagem no PDF @@ \begin{landscape}ZQX\end{landscape} @@ txt:ZQX
+@pkg rotating
+`rotating` — `sidewaystable` `sidewaysfigure` `\rotatebox` `turn` @@ \begin{sidewaystable}ZQX\end{sidewaystable} @@ txt:ZQX
+@pkg -
+`\textheight` + `\topmargin` clássicos @@ \setlength{\topmargin}{0cm}ZQX @@ margem
+## Colunas
+@pkg multicol
+`multicols` — `\begin{multicols}{2}` @@ \begin{multicols}{2}ZQX\end{multicols} @@ txt:ZQX
+`multicols*` (balanceamento) · `\columnbreak` · `\columnsep` · `\columnseprule` @@ \begin{multicols}{2}A\columnbreak ZQX\end{multicols} @@ txt:ZQX
+`\multicolsep` `\premulticols` `\postmulticols` `\raggedcolumns` @@ \begin{multicols}{3}ZQX\end{multicols} @@ txt:ZQX
+@pkg -
+`\twocolumn` / `\onecolumn` / `\columnwidth` @@ \twocolumn ZQX @@ txt:ZQX
+`\begin{multicols}` com título largo `\begin{multicols}{2}[\section{T}]` @@ \usepackage{multicol}\begin{multicols}{2}[\section{T}]ZQX\end{multicols} @@ txt:ZQX
+@pkg paracol
+`paracol` — colunas paralelas (`\switchcolumn`) @@ \begin{paracol}{2}ZQX\switchcolumn B\end{paracol} @@ txt:ZQX
+@pkg -
+# Ambientes de texto, listas e citações
+@cls article
+@pkg -
+## Listas
+`itemize` @@ \begin{itemize}\item ZQX\end{itemize} @@ item
+`enumerate` @@ \begin{enumerate}\item ZQX\end{enumerate} @@ ord
+`description` (`\item[termo]`) @@ \begin{description}\item[T] ZQX\end{description} @@ item&txt:T
+`\item[rótulo]` personalizado @@ \begin{itemize}\item[$\star$] ZQX\end{itemize} @@ item
+Listas aninhadas (4 níveis) @@ \begin{itemize}\item A\begin{itemize}\item ZQX\end{itemize}\end{itemize} @@ nivel2
+Marcadores por nível: `\labelitemi` … `\labelitemiv` @@ \renewcommand{\labelitemi}{--}\begin{itemize}\item ZQX\end{itemize} @@ item
+Numeração por nível: `\labelenumi` … `\theenumi` (a., i., A.) @@ \renewcommand{\labelenumi}{\alph{enumi})}\begin{enumerate}\item ZQX\end{enumerate} @@ lista:alfa
+`\setcounter{enumi}{n}` (continuar numeração) @@ \begin{enumerate}\setcounter{enumi}{3}\item ZQX\end{enumerate} @@ ord
+`\item` com `\label` e `\ref` @@ \begin{enumerate}\item\label{i} ZQX\end{enumerate}\ref{i} @@ ord
+`\par` / linha em branco dentro de item @@ \begin{itemize}\item A⏎⏎ZQX\end{itemize} @@ item
+`list` / `trivlist` (listas genéricas) @@ \begin{list}{}{}\item ZQX\end{list} @@ item
+`\listparindent` `\itemindent` `\leftmargin` em `list` @@ \begin{list}{*}{\setlength{\leftmargin}{1cm}}\item ZQX\end{list} @@ item
+@pkg enumitem
+`enumitem`: `label=` (`\alph*)`, `\roman*.`, `(\arabic*)`) @@ \begin{enumerate}[label=\alph*)]\item ZQX\end{enumerate} @@ lista:alfa
+`enumitem`: `label=` com romano maiúsculo `\Roman*` @@ \begin{enumerate}[label=\Roman*.]\item ZQX\end{enumerate} @@ lista:romana
+`enumitem`: `start=` @@ \begin{enumerate}[start=5]\item ZQX\end{enumerate} @@ ord
+`enumitem`: `resume` / `resume*` @@ \begin{enumerate}\item A\end{enumerate}\begin{enumerate}[resume]\item ZQX\end{enumerate} @@ ord
+`enumitem`: `noitemsep` `nosep` `itemsep=` `parsep=` `topsep=` `partopsep=` @@ \begin{itemize}[noitemsep]\item ZQX\end{itemize} @@ item
+`enumitem`: `leftmargin=` `labelindent=` `labelwidth=` `labelsep=` `itemindent=` `align=` @@ \begin{itemize}[leftmargin=2cm]\item ZQX\end{itemize} @@ recuo
+`enumitem`: `\setlist{}` / `\setlist[itemize]{}` / `\setlist[enumerate,2]{}` @@ \setlist[itemize]{noitemsep}\begin{itemize}\item ZQX\end{itemize} @@ item
+`enumitem`: `\newlist{}{}{}` + `\setlist` (listas novas) @@ \newlist{minha}{enumerate}{3}\setlist[minha]{label=\arabic*}\begin{minha}\item ZQX\end{minha} @@ item
+`enumitem`: `label=\textbullet` / `label={\color{red}\textbullet}` @@ \begin{itemize}[label={\color{red}\textbullet}]\item ZQX\end{itemize} @@ cormarcador
+`enumitem`: `before=` `after=` `font=` `wide` `ref=` @@ \begin{itemize}[font=\bfseries]\item ZQX\end{itemize} @@ item
+`enumitem`: descrição `style=nextline` / `style=multiline` / `style=sameline` @@ \begin{description}[style=nextline]\item[T] ZQX\end{description} @@ item
+`enumitem`: `\SetLabelAlign` `\AddEnumerateCounter` `\setenumerate` `\setitemize` `\setdescription` @@ \setitemize{noitemsep}\begin{itemize}\item ZQX\end{itemize} @@ item
+@pkg paralist
+`paralist`: `compactitem` `compactenum` `compactdesc` @@ \begin{compactitem}\item ZQX\end{compactitem} @@ item
+`paralist`: `inparaenum` (lista no texto) `asparaenum` `inparaitem` @@ \begin{inparaenum}\item A \item ZQX\end{inparaenum} @@ txt:ZQX
+@pkg -
+Lista de tarefas com caixa (`\item[$\square$]`, `\item[\checkmark]`) @@ \begin{itemize}\item[$\square$] ZQX\end{itemize} @@ item
+`enumerate` com `\item[(a)]` rótulo manual @@ \begin{enumerate}\item[(a)] ZQX\end{enumerate} @@ ord
+`itemize` dentro de tabela e de `minipage` @@ \begin{tabular}{l}\begin{minipage}[t]{3cm}\begin{itemize}\item ZQX\end{itemize}\end{minipage}\end{tabular} @@ tab
+## Citações e blocos de texto
+`quote` @@ \begin{quote}ZQX\end{quote} @@ cit
+`quotation` (com recuo de parágrafo) @@ \begin{quotation}ZQX\end{quotation} @@ cit
+`verse` (poema, `\\` e `\\!`) @@ \begin{verse}ZQX\\ B\end{verse} @@ txt:ZQX
+`center` / `flushleft` / `flushright` @@ \begin{center}ZQX\end{center} @@ centro
+`abstract` (resumo) @@ \begin{abstract}ZQX\end{abstract} @@ txt:ZQX
+`titlepage` @@ \begin{titlepage}ZQX\end{titlepage} @@ txt:ZQX
+`minipage` — `\begin{minipage}[pos]{largura}` @@ \begin{minipage}{5cm}ZQX\end{minipage} @@ txt:ZQX
+`minipage` lado a lado (`\hfill`, `\hspace`) @@ \begin{minipage}{.4\textwidth}A\end{minipage}\hfill\begin{minipage}{.4\textwidth}ZQX\end{minipage} @@ txt:ZQX
+`\parbox[pos]{larg}{texto}` @@ \parbox{5cm}{ZQX} @@ txt:ZQX
+`\parbox` com `[t]`, `[b]`, `[c]` e altura `[c][3cm]` @@ \parbox[t]{5cm}{ZQX} @@ txt:ZQX
+`tabbing` (tabulação) com `\=` `\>` `\\` `\kill` @@ \begin{tabbing}A\=B\\ ZQX\>C\end{tabbing} @@ txt:ZQX
+`\raggedright` dentro de `parbox`, `\begin{flushleft}` aninhado @@ \parbox{4cm}{\raggedright ZQX} @@ txt:ZQX
+`\begin{samepage}` / `\nopagebreak` @@ \begin{samepage}ZQX\end{samepage} @@ txt:ZQX
+`\begin{sloppypar}` @@ \begin{sloppypar}ZQX\end{sloppypar} @@ txt:ZQX
+`\begin{comment}` (`comment`) e `\iffalse … \fi` — texto oculto @@ \usepackage{comment}\begin{comment}oculto\end{comment}ZQX @@ sem:oculto
+`\begin{filecontents}` fora do preâmbulo @@ \begin{filecontents}{a.txt}oculto\end{filecontents}ZQX @@ sem:oculto
+`\newenvironment{nome}{início}{fim}` + uso @@ \newenvironment{caixa}{\begin{center}}{\end{center}}\begin{caixa}ZQX\end{caixa} @@ centro
+`\renewenvironment` @@ \renewenvironment{quote}{\begin{center}}{\end{center}}\begin{quote}ZQX\end{quote} @@ centro
+`\newenvironment` com argumentos `[n]` e `#1` @@ \newenvironment{av}[1]{\textbf{#1}: }{}\begin{av}{Nota}ZQX\end{av} @@ b
+`\newenvironment{x}` com contador e `\item` próprio @@ \newcounter{n}\newenvironment{x}{\stepcounter{n}\par\textbf{\arabic{n}.}}{}\begin{x}ZQX\end{x} @@ txt:1.
+`\renewcommand{\labelenumi}` e `\renewcommand{\theenumi}` @@ \renewcommand{\theenumi}{\roman{enumi}}\begin{enumerate}\item ZQX\end{enumerate} @@ ord
+## Código literal
+`verbatim` @@ \begin{verbatim}ZQX\end{verbatim} @@ cod
+`verbatim*` (espaços visíveis) @@ \begin{verbatim*}ZQX a\end{verbatim*} @@ cod
+`\verb|texto|` e `\verb*` @@ \verb|ZQX| @@ tt
+`\begin{Verbatim}` (`fancyvrb`) `[frame=single,numbers=left]` @@ \usepackage{fancyvrb}\begin{Verbatim}[frame=single]ZQX\end{Verbatim} @@ cod
+`\VerbatimInput{}` / `\fvset{}` / `\DefineVerbatimEnvironment` @@ \usepackage{fancyvrb}\fvset{fontsize=\small}ZQX @@ ign
+`\lstinline{}` / `\lstinline|…|` @@ \usepackage{listings}\lstinline|ZQX| @@ tt
+`\begin{lstlisting}` @@ \usepackage{listings}\begin{lstlisting}ZQX\end{lstlisting} @@ cod
+`\mintinline{}{}` / `\begin{minted}{linguagem}` @@ \usepackage{minted}\begin{minted}{python}ZQX\end{minted} @@ cod
+`\texttt{}` com caracteres especiais e `\detokenize` @@ \texttt{\detokenize{a_b} ZQX} @@ tt
+`alltt` (`alltt`) @@ \usepackage{alltt}\begin{alltt}ZQX\end{alltt} @@ cod
+`\begin{lstlisting}[language=Python]` com linguagem @@ \usepackage{listings}\begin{lstlisting}[language=Python]ZQX\end{lstlisting} @@ cod
+# Tabelas
+@cls article
+@pkg -
+## tabular básico
+`tabular` — colunas `l c r` @@ \begin{tabular}{lcr}ZQX&B&C\\D&E&F\end{tabular} @@ tab&linhas:2&colunas:3
+`tabular` — `|` separadores de coluna e `\hline` @@ \begin{tabular}{|l|l|}\hline ZQX&B\\\hline\end{tabular} @@ tab
+`tabular` — `p{larg}` (parágrafo na célula) @@ \begin{tabular}{p{3cm}l}ZQX&B\end{tabular} @@ tab&colunas:2
+`tabular` — `@{}` e `!{}` (espaço/separador de coluna) @@ \begin{tabular}{@{}ll@{}}ZQX&B\end{tabular} @@ tab&colunas:2
+`tabular` — `*{3}{c}` (repetição de coluna) @@ \begin{tabular}{*{3}{c}}ZQX&B&C\end{tabular} @@ tab&colunas:3
+`tabular` — `[t]` `[b]` `[c]` (alinhamento vertical) @@ \begin{tabular}[t]{l}ZQX\end{tabular} @@ tab
+`\hline` linha horizontal @@ \begin{tabular}{l}\hline ZQX\\\hline\end{tabular} @@ tab
+`\cline{i-j}` linha parcial @@ \begin{tabular}{ll}ZQX&B\\\cline{1-1}C&D\end{tabular} @@ tab
+`\multicolumn{n}{c}{texto}` @@ \begin{tabular}{lll}\multicolumn{2}{c}{ZQX}&C\end{tabular} @@ tab&mescla
+`\\[espaço]` em tabela e `\\*` @@ \begin{tabular}{l}A\\[5pt]ZQX\end{tabular} @@ tab
+`\tabularnewline` @@ \begin{tabular}{l}A\tabularnewline ZQX\end{tabular} @@ tab&linhas:2
+Texto de célula com negrito, cor, fórmula, nota @@ \begin{tabular}{l}\textbf{ZQX}\end{tabular} @@ tab&b
+`\\` dentro de `\parbox`/`\shortstack`/`\makecell` na célula @@ \begin{tabular}{l}\shortstack{A\\ZQX}\end{tabular} @@ tab
+`\arraystretch` (altura das linhas) @@ \renewcommand{\arraystretch}{1.5}\begin{tabular}{l}ZQX\end{tabular} @@ tab
+`\tabcolsep` / `\arrayrulewidth` / `\extrarowheight` @@ \setlength{\tabcolsep}{10pt}\begin{tabular}{l}ZQX\end{tabular} @@ tab
+`tabular*` com largura e `\extracolsep{\fill}` @@ \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}ll}ZQX&B\end{tabular*} @@ tab
+`array` (matriz de texto em modo matemático) @@ $\begin{array}{cc}ZQX&B\end{array}$ @@ math
+`tabular` aninhada em célula @@ \begin{tabular}{l}\begin{tabular}{l}ZQX\end{tabular}\end{tabular} @@ tab
+Célula vazia e `&` escapado `\&` @@ \begin{tabular}{ll}ZQX&\&\end{tabular} @@ tab
+@pkg array
+`array`: `m{larg}` e `b{larg}` (meio e base) @@ \begin{tabular}{m{3cm}l}ZQX&B\end{tabular} @@ tab&colunas:2
+`array`: `>{\bfseries}c` (formatação por coluna) @@ \begin{tabular}{>{\bfseries}c}ZQX\end{tabular} @@ tab&b
+`array`: `<{texto}` (depois da coluna) @@ \begin{tabular}{c<{\%}}ZQX\end{tabular} @@ tab
+`array`: `\newcolumntype{C}{>{\centering\arraybackslash}p{3cm}}` @@ \newcolumntype{C}{>{\centering\arraybackslash}p{3cm}}\begin{tabular}{C}ZQX\end{tabular} @@ tab&centro
+`array`: `\arraybackslash` / `\raggedright` em coluna `p` @@ \begin{tabular}{>{\raggedright\arraybackslash}p{3cm}}ZQX\end{tabular} @@ tab
+`array`: `\extrarowheight` · `\firsthline` `\lasthline` · `\hdashline` (`arydshln`) @@ \setlength{\extrarowheight}{3pt}\begin{tabular}{l}ZQX\end{tabular} @@ tab
+@pkg booktabs
+`booktabs`: `\toprule` `\midrule` `\bottomrule` @@ \begin{tabular}{l}\toprule ZQX\\\midrule B\\\bottomrule\end{tabular} @@ tab&linhas:2
+`booktabs`: `\cmidrule(lr){2-3}` @@ \begin{tabular}{lll}A&ZQX&C\\\cmidrule(lr){2-3}D&E&F\end{tabular} @@ tab
+`booktabs`: `\addlinespace` `\specialrule` `\morecmidrules` @@ \begin{tabular}{l}ZQX\\\addlinespace B\end{tabular} @@ tab
+`booktabs`: `\heavyrulewidth` `\lightrulewidth` `\cmidrulewidth` `\belowrulesep` `\aboverulesep` @@ \setlength{\heavyrulewidth}{2pt}\begin{tabular}{l}\toprule ZQX\end{tabular} @@ tab
+@pkg multirow
+`multirow`: `\multirow{n}{*}{texto}` @@ \begin{tabular}{ll}\multirow{2}{*}{ZQX}&B\\&C\end{tabular} @@ tab&mescla
+`multirow`: `\multirow` com largura fixa e `\multirowsetup` · `bigstrut` · `\bigstrut` @@ \begin{tabular}{ll}\multirow{2}{3cm}{ZQX}&B\\&C\end{tabular} @@ =~
+`multirow` + `\multicolumn` combinados (célula 2×2) @@ \begin{tabular}{ll}\multicolumn{2}{c}{\multirow{2}{*}{ZQX}}\\\end{tabular} @@ tab&mescla
+@pkg colortbl
+`colortbl`: `\rowcolor{cor}` @@ \usepackage{xcolor}\begin{tabular}{l}\rowcolor{yellow}ZQX\end{tabular} @@ tab&fundo
+`colortbl`: `\cellcolor{cor}` @@ \usepackage{xcolor}\begin{tabular}{l}\cellcolor{yellow}ZQX\end{tabular} @@ tab&fundo
+`colortbl`: `\columncolor{cor}` (em `>{\columncolor{}}`) @@ \usepackage{xcolor}\begin{tabular}{>{\columncolor{yellow}}l}ZQX\end{tabular} @@ tab&fundo
+`colortbl`/`xcolor` `table`: `\rowcolors{1}{white}{gray!10}` (zebra) @@ \usepackage[table]{xcolor}\rowcolors{1}{white}{gray!10}\begin{tabular}{l}ZQX\\B\end{tabular} @@ tab&fundo
+`colortbl`: `\arrayrulecolor{cor}` `\doublerulesep` `\hline` colorida @@ \usepackage{xcolor}\arrayrulecolor{red}\begin{tabular}{|l|}\hline ZQX\\\hline\end{tabular} @@ tab
+@pkg tabularx
+`tabularx`: coluna `X` com largura total @@ \begin{tabularx}{\textwidth}{lX}A&ZQX\end{tabularx} @@ tab&colunas:2
+`tabularx`: `\raggedright\arraybackslash` na coluna `X` · `\newcolumntype{Y}{>{\centering\arraybackslash}X}` @@ \newcolumntype{Y}{>{\centering\arraybackslash}X}\begin{tabularx}{\textwidth}{Y}ZQX\end{tabularx} @@ tab
+@pkg tabulary
+`tabulary`: colunas `L C R J` @@ \begin{tabulary}{\textwidth}{LC}ZQX&B\end{tabulary} @@ tab&colunas:2
+@pkg longtable
+`longtable` (quebra entre páginas) @@ \begin{longtable}{ll}ZQX&B\\C&D\end{longtable} @@ tab&linhas:2
+`longtable`: `\endfirsthead` `\endhead` `\endfoot` `\endlastfoot` (cabeçalho repetido) @@ \begin{longtable}{l}H\\\endhead ZQX\end{longtable} @@ tab
+`longtable`: `\caption` e `\label` dentro da tabela · `\caption*` @@ \begin{longtable}{l}\caption{Cap}\\ ZQX\end{longtable} @@ tab&txt:Cap
+`longtable`: `\LTleft` `\LTright` `\LTpre` `\LTpost` `\LTcapwidth` · `\setcounter{LTchunksize}` @@ \begin{longtable}{l}ZQX\end{longtable} @@ tab
+@pkg supertabular
+`supertabular` / `xtab` (alternativas) @@ \begin{supertabular}{l}ZQX\end{supertabular} @@ tab
+@pkg makecell
+`makecell`: `\makecell{A\\B}` @@ \begin{tabular}{l}\makecell{A\\ZQX}\end{tabular} @@ tab
+`makecell`: `\thead{}` `\Gape` `\makecell[l]{}` `\rowcolors` @@ \begin{tabular}{l}\thead{ZQX}\end{tabular} @@ tab&b
+@pkg diagbox
+`diagbox`: `\diagbox{A}{B}` (célula diagonal) @@ \begin{tabular}{l}\diagbox{ZQX}{B}\end{tabular} @@ tab
+@pkg siunitx
+`siunitx`: coluna `S` (alinha pelo decimal) @@ \begin{tabular}{S}ZQX 12,5\end{tabular} @@ =~
+@pkg threeparttable
+`threeparttable`: `tablenotes` `\tnote{a}` @@ \begin{threeparttable}\begin{tabular}{l}A\tnote{a}\end{tabular}\begin{tablenotes}\item[a] ZQX\end{tablenotes}\end{threeparttable} @@ tab
+@pkg adjustbox
+`adjustbox`: `\adjustbox{max width=\textwidth}{tabela}` · `adjustbox` (ambiente) @@ \adjustbox{max width=\textwidth}{ZQX} @@ txt:ZQX
+@pkg graphicx
+`\resizebox{\textwidth}{!}{tabela}` @@ \resizebox{\textwidth}{!}{\begin{tabular}{l}ZQX\end{tabular}} @@ tab
+@pkg csvsimple
+`csvsimple` / `pgfplotstable` / `datatool` (tabela de CSV) @@ \csvautotabular{dados.csv}ZQX
+@pkg ltablex
+`ltablex` / `xltabular` (`tabularx` que quebra) @@ \begin{xltabular}{\textwidth}{X}ZQX\end{xltabular} @@ tab
+@pkg hhline
+`hhline`: `\hhline{|=|=|}` (linhas duplas) @@ \begin{tabular}{l}\hhline{=}ZQX\end{tabular} @@ tab
+@pkg tabu
+`tabu` (`X[2c]`) / `nicematrix` / `tabularray` (`tblr`) @@ \begin{tblr}{ll}ZQX&B\end{tblr} @@ tab
+@pkg -
+## Tabela flutuante
+`table` com `\caption` e `\label` @@ \begin{table}\caption{Legenda}\label{t}\begin{tabular}{l}ZQX\end{tabular}\end{table} @@ tab&legenda
+`table` — posição `[h]` `[t]` `[b]` `[p]` `[!]` `[H]` @@ \begin{table}[htbp]\begin{tabular}{l}ZQX\end{tabular}\end{table} @@ tab
+`table*` (duas colunas) @@ \begin{table*}\begin{tabular}{l}ZQX\end{tabular}\end{table*} @@ tab
+`\caption[curta]{longa}` · `\caption*{}` · `\captionof{table}{}` @@ \begin{table}\caption[c]{ZQX}\begin{tabular}{l}A\end{tabular}\end{table} @@ legenda
+Legenda acima ou abaixo (ordem de `\caption` e `tabular`) @@ \begin{table}\caption{ZQX}\begin{tabular}{l}A\end{tabular}\end{table} @@ legenda
+`\centering` dentro de `table` @@ \begin{table}\centering\begin{tabular}{l}ZQX\end{tabular}\end{table} @@ tab
+Fonte da tabela (nota abaixo, ABNT) @@ \begin{table}\begin{tabular}{l}ZQX\end{tabular}\\ Fonte: autor\end{table} @@ tab
+`\listoftables` com as legendas das tabelas @@ \begin{table}\caption{ZQX}\begin{tabular}{l}A\end{tabular}\end{table}\listoftables @@ lot
+@pkg float
+`float`: `[H]` posição fixa @@ \begin{table}[H]\begin{tabular}{l}ZQX\end{tabular}\end{table} @@ tab
+`float`: `\newfloat{nome}{htbp}{ext}` · `\floatstyle{boxed}` · `\restylefloat` @@ \newfloat{quadro}{htbp}{lop}\begin{quadro}ZQX\end{quadro} @@ txt:ZQX
+@pkg placeins
+`placeins`: `\FloatBarrier` · `\usepackage[section]{placeins}` @@ \FloatBarrier ZQX @@ ign
+@pkg afterpage
+`\afterpage{\clearpage}` @@ \afterpage{\clearpage}ZQX @@ ign
+@pkg -
+`\floatpagefraction` `\topfraction` `\bottomfraction` `\textfraction` `\floatsep` `\textfloatsep` `\intextsep` `\dbltopfraction` `\dblfloatpagefraction` `\topnumber` `\bottomnumber` `\totalnumber` @@ \renewcommand{\topfraction}{0.9}ZQX @@ ign
+`\suppressfloats` · `\clearpage` para despejar flutuantes @@ \suppressfloats ZQX @@ ign
+# Figuras, imagens e flutuantes
+@cls article
+@pkg graphicx
+## graphicx
+`\includegraphics{arquivo}` @@ \includegraphics{a.png}ZQX @@ img
+`\includegraphics[width=…]` (cm, `\textwidth`, `\linewidth`) @@ \includegraphics[width=5cm]{a.png}ZQX @@ img&imgtam
+`\includegraphics[height=…]` @@ \includegraphics[height=3cm]{a.png}ZQX @@ img&imgtam
+`\includegraphics[scale=…]` @@ \includegraphics[scale=0.5]{a.png}ZQX @@ img&imgtam
+`\includegraphics[angle=…]` (girar) @@ \includegraphics[angle=90]{a.png}ZQX @@ img
+`\includegraphics[keepaspectratio]` · `totalheight` · `origin` · `viewport` · `trim` · `clip` · `page=` (PDF) @@ \includegraphics[trim=1cm 1cm 1cm 1cm,clip]{a.png}ZQX @@ img
+`\includegraphics[width=.5\textwidth]` (fração da largura útil) @@ \includegraphics[width=.5\textwidth]{a.png}ZQX @@ img&imgtam
+`\includegraphics` de `.pdf` `.eps` `.jpg` `.svg` (`svg`) · `\graphicspath{}` · `\DeclareGraphicsExtensions` @@ \graphicspath{{img/}}\includegraphics{a}ZQX @@ img
+`\includegraphics[draft]` · `\setkeys{Gin}{width=\linewidth}` @@ \setkeys{Gin}{width=\linewidth}\includegraphics{a.png}ZQX @@ img
+`\rotatebox[origin=c]{90}{texto}` @@ \rotatebox{90}{ZQX} @@ txt:ZQX
+`\scalebox{sx}[sy]{texto}` · `\reflectbox{}` @@ \scalebox{2}{ZQX} @@ txt:ZQX
+`\resizebox{larg}{alt}{texto}` · `\resizebox*` @@ \resizebox{5cm}{!}{ZQX} @@ txt:ZQX
+`\graphicspath` com várias pastas · `\includegraphics*` @@ \includegraphics*[width=3cm]{a.png}ZQX @@ img
+`\includegraphics` em linha (dentro de parágrafo, `\raisebox`) @@ Antes \includegraphics[width=1cm]{a.png} ZQX @@ img
+Imagem embutida por `data:`/arquivo de dentro do `.fdoz` (nome com espaços e acentos) @@ \includegraphics{minha figura.png}ZQX @@ img
+## figure
+`figure` com `\includegraphics` + `\caption` @@ \begin{figure}\includegraphics{a.png}\caption{ZQX}\end{figure} @@ img&imgleg
+`figure` — posição `[h]` `[t]` `[b]` `[p]` `[H]` `[!htbp]` @@ \begin{figure}[htbp]\includegraphics{a.png}\caption{ZQX}\end{figure} @@ img&imgleg
+`figure*` (duas colunas) @@ \begin{figure*}\includegraphics{a.png}\caption{ZQX}\end{figure*} @@ img&imgleg
+`\caption[curta]{longa}` @@ \begin{figure}\includegraphics{a.png}\caption[c]{ZQX}\end{figure} @@ img&imgleg
+`\label` depois da `\caption` + `\ref` ("Figura 1") @@ \begin{figure}\includegraphics{a.png}\caption{A}\label{f}\end{figure}Ver \ref{f} ZQX @@ txt:1
+`\centering` em `figure` · `center` em volta de figura @@ \begin{figure}\centering\includegraphics{a.png}\caption{ZQX}\end{figure} @@ img&imgleg
+`\captionof{figure}{}` fora de flutuante · `\captionsetup` @@ \captionof{figure}{ZQX} @@ txt:ZQX
+Fonte da figura (nota ABNT) abaixo da legenda @@ \begin{figure}\includegraphics{a.png}\caption{A}\par Fonte: ZQX\end{figure} @@ txt:ZQX
+Várias imagens numa `figure` (`\hfill`, `\quad`) @@ \begin{figure}\includegraphics{a.png}\hfill\includegraphics{b.png}\caption{ZQX}\end{figure} @@ img
+`\listoffigures` com legendas @@ \begin{figure}\includegraphics{a.png}\caption{ZQX}\end{figure}\listoffigures @@ lof
+`\figurename` `\tablename` (nomes dos rótulos: "Figura", "Tabela") @@ \usepackage[brazil]{babel}\begin{figure}\includegraphics{a.png}\caption{ZQX}\end{figure} @@ img&imgleg
+`\setcounter{figure}{n}` · `\numberwithin{figure}{section}` @@ \numberwithin{figure}{section}ZQX
+@pkg float
+`float` `[H]` @@ \begin{figure}[H]\includegraphics{a.png}\caption{ZQX}\end{figure} @@ img&imgleg
+@pkg caption
+`caption`: `\captionsetup{font=small,labelfont=bf,format=hang,justification=centering}` @@ \captionsetup{labelfont=bf}\begin{figure}\includegraphics{a.png}\caption{ZQX}\end{figure} @@ img&imgleg
+`caption`: `labelsep=period` `textfont=it` `skip=` `margin=` `width=` `singlelinecheck=off` `position=top` @@ \captionsetup{labelsep=period}\begin{figure}\includegraphics{a.png}\caption{ZQX}\end{figure} @@ img&imgleg
+`caption`: `\captionsetup[figure]{}` `\captionsetup[table]{}` · `\DeclareCaptionFormat` `\DeclareCaptionStyle` · `\caption*` @@ \captionsetup[table]{font=small}\begin{figure}\includegraphics{a.png}\caption{ZQX}\end{figure} @@ img&imgleg
+`caption`: `\captionof{}` · `\ContinuedFloat` · `\bothIfFirst` · `\clearcaptionsetup` @@ \captionof{table}{ZQX} @@ txt:ZQX
+@pkg subcaption
+`subcaption`: `subfigure` + `\caption` + legenda geral (a) (b) @@ \begin{figure}\begin{subfigure}{.45\textwidth}\includegraphics{a.png}\caption{ZQX}\end{subfigure}\end{figure} @@ img
+`subcaption`: `subtable` · `\subcaptionbox` · `\subref{}` @@ \begin{table}\begin{subtable}{.45\textwidth}\begin{tabular}{l}ZQX\end{tabular}\caption{S}\end{subtable}\end{table} @@ tab
+@pkg subfig
+`subfig`: `\subfloat[legenda]{\includegraphics{}}` @@ \begin{figure}\subfloat[ZQX]{\includegraphics{a.png}}\end{figure} @@ img
+@pkg subfigure
+`subfigure` (antigo): `\subfigure[]{}` @@ \begin{figure}\subfigure[ZQX]{\includegraphics{a.png}}\end{figure} @@ img
+@pkg wrapfig
+`wrapfig`: `\begin{wrapfigure}{r}{5cm}` (texto em volta) @@ \begin{wrapfigure}{r}{5cm}\includegraphics{a.png}\caption{ZQX}\end{wrapfigure} @@ =~
+`wrapfig`: `wraptable` · `\wrapoverhang` · `\intextsep` · `[l]` `[r]` `[i]` `[o]` @@ \begin{wraptable}{r}{5cm}\begin{tabular}{l}ZQX\end{tabular}\end{wraptable} @@ =~
+@pkg floatflt
+`floatflt`/`picinpar`/`sidecap` (`SCfigure` legenda lateral) @@ \begin{SCfigure}\includegraphics{a.png}\caption{ZQX}\end{SCfigure} @@ =~
+@pkg -
+`\begin{center}\includegraphics\end{center}` @@ \begin{center}\includegraphics{a.png}ZQX\end{center} @@ img
+`\fbox{\includegraphics{}}` (imagem com moldura) @@ \fbox{\includegraphics{a.png}}ZQX @@ img
+`\includepdf` (`pdfpages`) @@ \usepackage{pdfpages}\includepdf[pages=-]{a.pdf}ZQX
+@pkg pdfpages
+`pdfpages`: `pages=` `nup=` `landscape` `scale=` `pagecommand` `\includepdfmerge` @@ \includepdf[pages={1-3},nup=2x1]{a.pdf}ZQX
+@pkg -
+`\input{figura.pgf}` / `\includesvg` (`svg`) · `\includestandalone` (`standalone`) @@ \usepackage{svg}\includesvg{a}ZQX @@ img
+`overpic` / `eso-pic` / `textpos` (texto sobre imagem; marca-d'água de página) @@ \usepackage{eso-pic}\AddToShipoutPictureBG*{ZQX}texto
+`\setlength{\fboxsep}{0pt}\fbox{…}` borda ao redor da imagem @@ \setlength{\fboxsep}{0pt}\fbox{\includegraphics{a.png}}ZQX @@ img
+# Caixas, cor e decoração
+@cls article
+@pkg -
+## Caixas do LaTeX2e
+`\mbox{}` · `\makebox[larg][pos]{}` @@ \makebox[3cm][c]{ZQX} @@ txt:ZQX
+`\fbox{}` (moldura) @@ \fbox{ZQX} @@ borda
+`\framebox[larg][pos]{}` @@ \framebox[3cm][c]{ZQX} @@ borda
+`\parbox[pos][alt][int]{larg}{}` @@ \parbox[t][2cm][c]{4cm}{ZQX} @@ txt:ZQX
+`\raisebox{alt}[prof][alt]{}` @@ \raisebox{2pt}{ZQX} @@ txt:ZQX
+`\sbox` `\savebox` `\usebox` `\newsavebox` (caixa guardada) @@ \newsavebox{\cx}\sbox{\cx}{ZQX}\usebox{\cx} @@ txt:ZQX
+`lrbox` @@ \newsavebox{\cx}\begin{lrbox}{\cx}ZQX\end{lrbox}\usebox{\cx} @@ txt:ZQX
+`\fboxsep` `\fboxrule` (espaço e espessura da moldura) @@ \setlength{\fboxrule}{2pt}\fbox{ZQX} @@ borda
+`\shortstack[pos]{A\\B}` @@ \shortstack{A\\ZQX} @@ txt:ZQX
+`picture` / `\put` / `\line` / `\circle` / `\framebox` / `\makebox` (ambiente picture) @@ \begin{picture}(100,100)\put(0,0){ZQX}\end{picture} @@ txt:ZQX
+`\unitlength` · `\linethickness` · `\thicklines` · `\thinlines` · `\oval` · `\vector` · `\qbezier` @@ \unitlength=1mm\begin{picture}(10,10)\put(1,1){\line(1,0){5}}\end{picture}ZQX @@ txt:ZQX
+`\footnotesize` dentro de caixa; `\bf` em `\fbox` · `\fbox{\parbox}` @@ \fbox{\parbox{4cm}{ZQX}} @@ borda
+`\framebox` com borda e fundo (`\fcolorbox`) @@ \usepackage{xcolor}\fcolorbox{red}{yellow}{ZQX} @@ borda
+@pkg framed
+`framed`: `framed` `shaded` `leftbar` `snugshade` · `\fcolorbox`/`\colorbox` envolvendo texto @@ \begin{framed}ZQX\end{framed} @@ borda
+`framed`: `\FrameCommand` `\MakeFramed` `oframed` `titled-frame` @@ \usepackage{xcolor}\begin{shaded}ZQX\end{shaded} @@ fundo
+@pkg mdframed
+`mdframed`: `\begin{mdframed}[linecolor=,backgroundcolor=]` @@ \begin{mdframed}ZQX\end{mdframed} @@ borda
+`mdframed`: `linewidth` `innerleftmargin` `roundcorner` `frametitle` `topline`/`leftline` `\newmdenv` `\surroundwithmdframed` @@ \begin{mdframed}[linewidth=2pt,roundcorner=5pt]ZQX\end{mdframed} @@ borda
+@pkg tcolorbox
+`tcolorbox`: `\begin{tcolorbox}[colback=,colframe=,title=]` @@ \usepackage{xcolor}\begin{tcolorbox}[colback=yellow,title=T]ZQX\end{tcolorbox} @@ fundo
+`tcolorbox`: `\tcbset` · `\newtcolorbox{nome}[n][opts]{opções}` · `\DeclareTColorBox` @@ \newtcolorbox{aviso}{colback=yellow}\begin{aviso}ZQX\end{aviso} @@ fundo
+`tcolorbox`: `breakable` (quebra entre páginas) · `enhanced` · `sharp corners` · `arc=` · `boxrule=` · `left=` `right=` `top=` `bottom=` @@ \begin{tcolorbox}[breakable,boxrule=2pt]ZQX\end{tcolorbox} @@ borda
+`tcolorbox`: `\tcbuselibrary{skins,breakable,listings,theorems,minted,raster}` @@ \tcbuselibrary{skins}ZQX
+`tcolorbox`: `\tcbox[opts]{texto}` · `\tcboxmath` (caixa em linha) @@ \tcbox{ZQX} @@ txt:ZQX
+`tcolorbox`: `tcbtheorem` · `\tcblower` (parte inferior) · `\tcbline` · `fonttitle` `coltitle` `colbacktitle` @@ \begin{tcolorbox}[title=T]ZQX\tcblower B\end{tcolorbox} @@ borda
+`tcolorbox`: `tcblisting` (código em caixa) · `tcbraster` @@ \begin{tcbraster}ZQX\end{tcbraster} @@ txt:ZQX
+@pkg fancybox
+`fancybox`: `\shadowbox{}` `\doublebox{}` `\ovalbox{}` `\Ovalbox{}` `Sbox`/`Bbox` · `\fancyoval` · `\cornersize` @@ \shadowbox{ZQX} @@ borda
+@pkg boxedminipage
+`boxedminipage`: `\begin{boxedminipage}{larg}` @@ \begin{boxedminipage}{4cm}ZQX\end{boxedminipage} @@ borda
+@pkg bclogo
+`bclogo` / `awesomebox` / `tcolorbox` blocos de aviso (`\begin{notebox}`) @@ \usepackage{awesomebox}\notebox{ZQX} @@ txt:ZQX
+@pkg -
+## Cor (xcolor, color)
+`\usepackage{color}` e `\usepackage{xcolor}` @@ \usepackage{xcolor}ZQX
+`\color{nome}` (declaração) @@ \usepackage{xcolor}{\color{red}ZQX} @@ cor
+`\textcolor{nome}{texto}` @@ \usepackage{xcolor}\textcolor{blue}{ZQX} @@ cor
+`\color[rgb]{r,g,b}` · `\color[RGB]{}` · `\color[HTML]{RRGGBB}` · `\color[gray]{0.5}` · `\color[cmyk]{}` @@ \usepackage{xcolor}\textcolor[HTML]{FF8800}{ZQX} @@ cor
+`\textcolor[rgb]{0.1,0.2,0.3}{}` @@ \usepackage{xcolor}\textcolor[rgb]{0.1,0.2,0.3}{ZQX} @@ cor
+Cores nomeadas básicas (`red` `green` `blue` `black` `white` `cyan` `magenta` `yellow`) @@ \usepackage{xcolor}\textcolor{magenta}{ZQX} @@ cor
+Cores nomeadas dvips (`xcolor` com `dvipsnames`: `Orange`, `RoyalBlue`, `ForestGreen`…) @@ \usepackage[dvipsnames]{xcolor}\textcolor{RoyalBlue}{ZQX} @@ cor
+`svgnames` (`DarkOliveGreen`, `Tomato`…) · `x11names` · `[table]` · `[usenames]` @@ \usepackage[svgnames]{xcolor}\textcolor{Tomato}{ZQX} @@ cor
+`\definecolor{nome}{rgb}{r,g,b}` e uso @@ \usepackage{xcolor}\definecolor{minha}{rgb}{1,0,0}\textcolor{minha}{ZQX} @@ cor
+`\definecolor{nome}{HTML}{RRGGBB}` @@ \usepackage{xcolor}\definecolor{minha}{HTML}{336699}\textcolor{minha}{ZQX} @@ cor
+`\definecolor{nome}{RGB}{r,g,b}` (0–255) @@ \usepackage{xcolor}\definecolor{minha}{RGB}{10,20,30}\textcolor{minha}{ZQX} @@ cor
+`\definecolor{nome}{gray}{g}` · `{cmyk}{c,m,y,k}` · `{hsb}` · `{Hsb}` · `{HSB}` · `{wave}` @@ \usepackage{xcolor}\definecolor{minha}{cmyk}{1,0,0,0}\textcolor{minha}{ZQX} @@ cor
+`\colorlet{novo}{base}` / `\colorlet{novo}{base!50}` @@ \usepackage{xcolor}\colorlet{c}{red!50}\textcolor{c}{ZQX} @@ cor
+Mistura `red!50`, `red!30!blue`, `-red`, `red!50!white!80!black` @@ \usepackage{xcolor}\textcolor{red!30!blue}{ZQX} @@ cor
+`\colorbox{cor}{texto}` @@ \usepackage{xcolor}\colorbox{yellow}{ZQX} @@ realce
+`\fcolorbox{borda}{fundo}{texto}` @@ \usepackage{xcolor}\fcolorbox{red}{yellow}{ZQX} @@ realce
+`\pagecolor{cor}` (cor da página) · `\nopagecolor` @@ \usepackage{xcolor}\pagecolor{yellow}ZQX @@ corpagina
+`\normalcolor` · `\defaultcolor` @@ \usepackage{xcolor}{\color{red}a \normalcolor ZQX} @@ txt:ZQX
+`\rowcolor` `\cellcolor` `\columncolor` · `\rowcolors` (ver Tabelas) @@ \usepackage{xcolor}\textcolor{red}{ZQX} @@ cor
+`\textcolor` dentro de `\textbf`, título, legenda, nota @@ \usepackage{xcolor}\section{\textcolor{red}{ZQX}} @@ h:1
+`\color` em ambiente (`\begin{color}{red}`) · `\color` em grupo `{…}` @@ \usepackage{xcolor}\begingroup\color{red}ZQX\endgroup @@ cor
+`\hypersetup{colorlinks,linkcolor=,urlcolor=,citecolor=}` @@ \usepackage{xcolor}\usepackage{hyperref}\hypersetup{colorlinks,urlcolor=red}\url{http://x/ZQX} @@ link
+`\setulcolor` `\setstcolor` (soul) · `\sethlcolor` @@ \usepackage{xcolor}\usepackage{soul}\sethlcolor{green}\hl{ZQX} @@ realce
+`\textcolor[named]{}` e `\selectcolormodel` · `\xcolorsetup` · `\definecolorset` · `\providecolor` @@ \usepackage{xcolor}\providecolor{p}{rgb}{1,0,0}\textcolor{p}{ZQX} @@ cor
+`xcolor`: funções `\colorlet{c}{red!20}` · `\blendcolors` · `\harmony` · `\xcolor` séries (`\definecolorseries`) @@ \usepackage{xcolor}\definecolorseries{s}{rgb}{last}{red}{blue}\resetcolorseries[3]{s}\textcolor{s!!+}{ZQX} @@ cor
+## Linhas, réguas e decoração
+`\rule{larg}{alt}` (barra preta) @@ \rule{3cm}{2pt}ZQX @@ reg
+`\hrule` · `\hrulefill` · `\dotfill` · `\leaders` @@ \hrule ZQX @@ reg
+`\underline{}` · `\overline{}` (texto) · `\uline` @@ \underline{ZQX} @@ u
+`\ul` · `\sout` · `\xout` · `\uwave` · `\dashuline` @@ \usepackage{ulem}\sout{ZQX} @@ s
+`\cancel{}` `\bcancel{}` `\xcancel{}` `\cancelto{}{}` (`cancel`, em texto/fórmula) @@ \usepackage{cancel}$\cancel{ZQX}$ @@ math
+`\fbox` · `\framebox` (ver Caixas) @@ \fbox{ZQX} @@ borda
+`\hl{}` · `\hlc[cor]{}` (realce com cor) · `\mbox{\colorbox}` @@ \usepackage{soul}\usepackage{xcolor}\hl{ZQX} @@ realce
+`\textsuperscript{}` · `\textsubscript{}` (marca d'água) @@ \textsuperscript{ZQX} @@ sup
+@pkg background
+`background`/`eso-pic`/`draftwatermark`: `\SetWatermarkText{RASCUNHO}` @@ \usepackage{draftwatermark}\SetWatermarkText{DRAFT}ZQX @@ marcadagua
+@pkg fancyhdr
+`fancyhdr` + `\fancypagestyle` borda ou linha decorativa (`\headrulewidth`) @@ \pagestyle{fancy}\renewcommand{\headrulewidth}{1pt}ZQX @@ ign
+@pkg pagecolor
+`pagecolor` · `\pagecolor` · `afterpage` + `\pagecolor` @@ \pagecolor{yellow}ZQX @@ corpagina
+@pkg -
+`\pgfdeclareverticalshading` · `tikz` sombreamento (fundo degradê) @@ \usepackage{tikz}\tikz\shade[left color=red,right color=blue](0,0)rectangle(2,1);ZQX
+`ornate`/`fancyvrb` bordas de página: `\usepackage{pgfpages}` `eso-pic` + `tikz` moldura da página @@ \usepackage{eso-pic}\AddToShipoutPictureBG{\put(0,0){ZQX}}texto @@ bordapag
+`\pagecolor` com `\afterpage{}` · `\thispagestyle{empty}` em capa colorida @@ \thispagestyle{empty}ZQX
+# Macros, contadores e programação
+@cls article
+@pkg -
+## Definição de comandos
+`\newcommand{\cmd}{texto}` @@ \newcommand{\meu}{ZQX}\meu @@ exp:ZQX&sem:\meu
+`\newcommand{\cmd}[n]{… #1 …}` @@ \newcommand{\meu}[1]{<#1>}\meu{ZQX} @@ exp:<ZQX>
+`\newcommand{\cmd}[n][padrão]{…}` (argumento opcional) @@ \newcommand{\meu}[2][a]{#1-#2}\meu{ZQX} @@ exp:a-ZQX
+`\newcommand*` (versão curta, sem `\par`) @@ \newcommand*{\meu}{ZQX}\meu @@ exp:ZQX
+`\renewcommand{\cmd}{…}` @@ \renewcommand{\today}{ZQX}\today @@ exp:ZQX
+`\providecommand{\cmd}{…}` @@ \providecommand{\meu}{ZQX}\meu @@ exp:ZQX
+`\DeclareRobustCommand` @@ \DeclareRobustCommand{\meu}{ZQX}\meu @@ exp:ZQX
+`\newenvironment{env}{início}{fim}` @@ \newenvironment{e}{<}{>}\begin{e}ZQX\end{e} @@ exp:<ZQX>
+`\newenvironment{env}[n][padrão]` e `\renewenvironment` @@ \newenvironment{e}[1]{<#1}{>}\begin{e}{a}ZQX\end{e} @@ exp:<aZQX>
+`\def\cmd#1#2{…}` (primitiva TeX) @@ \def\meu#1{<#1>}\meu{ZQX} @@ exp:<ZQX>
+`\def` com delimitadores (`\def\a#1.#2{}`) · `\edef` · `\gdef` · `\xdef` @@ \edef\meu{ZQX}\meu @@ exp:ZQX
+`\let\novo\velho` @@ \let\novo\textbf\novo{ZQX} @@ b
+`\expandafter` · `\csname…\endcsname` · `\noexpand` · `\the` · `\string` · `\meaning` @@ \expandafter\def\csname meu\endcsname{ZQX}\csname meu\endcsname @@ exp:ZQX
+`\@namedef` · `\@nameuse` · `\makeatletter`/`\makeatother` · comandos `\@x` @@ \makeatletter\def\@meu{ZQX}\@meu\makeatother @@ exp:ZQX
+Macro que chama macro (recursão limitada, `#` duplo `##`) @@ \newcommand{\a}{ZQX}\newcommand{\b}{\a\a}\b @@ exp:ZQXZQX
+Macro com `\xspace` (`xspace`) @@ \usepackage{xspace}\newcommand{\x}{abc\xspace}\x ZQX @@ exp:abc ZQX
+`\NewDocumentCommand{\cmd}{m o}{…}` (xparse) @@ \usepackage{xparse}\NewDocumentCommand{\meu}{m}{<#1>}\meu{ZQX} @@ exp:<ZQX>
+`\NewDocumentEnvironment` · `\RenewDocumentCommand` · `\ProvideDocumentCommand` · `\DeclareDocumentCommand` · tipos `s m o O{} d<> v` @@ \usepackage{xparse}\NewDocumentEnvironment{e}{m}{<#1}{>}\begin{e}{a}ZQX\end{e} @@ exp:<a
+`\NewExpandableDocumentCommand` · `\IfBooleanTF` · `\IfValueTF` · `\IfNoValueTF` · `\IfBlankTF` @@ \usepackage{xparse}\NewDocumentCommand{\meu}{o}{\IfValueTF{#1}{com}{sem}}\meu[a] ZQX @@ exp:com
+`\newrobustcmd` (etoolbox) · `\robustify` · `\preto` `\apptocmd` `\patchcmd` `\pretocmd` `\csdef` `\csuse` `\ifdef` `\ifundef` `\ifstrequal` `\ifblank` @@ \usepackage{etoolbox}\newrobustcmd{\meu}{ZQX}\meu @@ exp:ZQX
+`\ifthenelse{cond}{sim}{não}` (ifthen) @@ \usepackage{ifthen}\ifthenelse{1=1}{ZQX}{não} @@ exp:ZQX&sem:não
+`\ifthenelse` com `\equal{}{}` `\isodd{}` `\lengthtest{}` `\boolean{}` `\and` `\or` `\not` @@ \usepackage{ifthen}\ifthenelse{\equal{a}{a}}{ZQX}{não} @@ exp:ZQX&sem:não
+`\newboolean{b}` · `\setboolean{b}{true}` · `\provideboolean` @@ \usepackage{ifthen}\newboolean{b}\setboolean{b}{true}\ifthenelse{\boolean{b}}{ZQX}{não} @@ exp:ZQX
+`\newif\ifx` · `\iftrue \iffalse` · `\ifx` · `\ifnum` · `\ifdim` · `\ifodd` · `\else` · `\or` · `\fi` @@ \newif\ifx\xtrue\ifx ZQX\else não\fi @@ exp:ZQX&sem:não
+`\ifdefined` · `\ifcsname` · `\ifcat` · `\ifvoid` · `\ifhmode` · `\ifvmode` · `\ifmmode` @@ \ifdefined\foo não\else ZQX\fi @@ exp:ZQX&sem:não
+`\@ifstar` · `\@ifnextchar` · `\@ifundefined` · `\@ifpackageloaded` · `\IfFileExists` · `\@ifclassloaded` @@ \makeatletter\@ifundefined{foo}{ZQX}{não}\makeatother @@ exp:ZQX
+`\@gobble` · `\@firstofone` · `\@firstoftwo` · `\@secondoftwo` · `\@empty` · `\@tempa` @@ \makeatletter\@firstoftwo{ZQX}{não}\makeatother @@ exp:ZQX
+`\ifpdf` · `\ifxetex` · `\ifluatex` (`ifpdf`/`iftex`) @@ \usepackage{iftex}\ifPDFTeX ZQX\else não\fi @@ exp:ZQX
+`\pdfstrcmp` · `\strcmp` · `\IfStrEq` (xstring) `\IfSubStr` `\StrLen` `\StrLeft` `\StrBehind` `\StrSubstitute` @@ \usepackage{xstring}\IfEq{a}{a}{ZQX}{não} @@ exp:ZQX&sem:não
+`\fpeval{}` · `\numexpr` · `\dimexpr` · `\FPadd` (`fp`, `xfp`, `pgfmath`: `\pgfmathparse`) @@ \usepackage{xfp}\fpeval{1+2} ZQX @@ exp:3
+`\count` · `\dimen` · `\skip` · `\toks` · `\box` (registradores TeX) · `\newcount` `\newdimen` `\newskip` `\newtoks` @@ \newcount\n \n=3 ZQX @@ exp:ZQX
+`\loop … \repeat` · `\whiledo` · `\dountil` · `\@whilenum` @@ \newcount\n \loop\advance\n by 1 \ifnum\n<3 \repeat ZQX @@ exp:ZQX
+`\foreach` (pgffor) · `\forloop{}` (forloop) · `\forcsvlist` · `\docsvlist` (etoolbox) · `\dolistloop` · `\forlistloop` @@ \usepackage{pgffor}\foreach \x in {1,2}{\x }ZQX @@ exp:1 2
+`\newcommand` com `\ifx#1\empty` testes · `\ifstrempty` · `\ifdefempty` @@ \usepackage{etoolbox}\ifstrempty{}{ZQX}{não} @@ exp:ZQX
+`\input{}` de arquivo de macros (`macros.tex`, `.sty` próprio, `\usepackage{meu}`) @@ \usepackage{meupacote}ZQX @@ ign
+`\ProvidesPackage` · `\ProvidesClass` · `\LoadClass` · `\DeclareOption` · `\ProcessOptions` · `\NeedsTeXFormat` · `\ExecuteOptions` (criar pacote/classe) @@ \ProvidesPackage{x}ZQX @@ ign
+`\newtheorem` · `\theoremstyle` (ver amsthm) @@ \newtheorem{t}{Teo}\begin{t}ZQX\end{t} @@ exp:ZQX
+`expl3`: `\ExplSyntaxOn` · `\cs_new:Npn` · `\tl_set:Nn` · `\int_eval:n` · `\seq_` · `\prop_` · `\clist_` · `\str_` · `\regex_` @@ \ExplSyntaxOn \cs_new:Npn \meu {ZQX} \ExplSyntaxOff \meu @@ exp:ZQX
+`Lua`: `\directlua{}` · `\luaexec` · `luacode` (LuaLaTeX) @@ \directlua{tex.print("ZQX")} @@ exp:ZQX
+`\write18` · `\immediate\write18{}` · `\input{|"cmd"}` (shell escape) · `\ShellEscape` @@ \immediate\write18{ls}ZQX @@ ign
+`\catcode` · `\lccode` · `\uccode` · `\mathcode` · `\sfcode` (códigos de categoria) @@ \catcode`\@=11 ZQX @@ ign
+`\afterassignment` · `\aftergroup` · `\begingroup`/`\endgroup` · `\bgroup`/`\egroup` · `\global` · `\long` · `\outer` · `\protected` @@ \begingroup ZQX\endgroup @@ exp:ZQX
+`\csname` · `\string` · `\detokenize` · `\unexpanded` · `\scantokens` · `\everypar` · `\everymath` · `\everydisplay` · `\everyhbox` · `\everyjob` @@ \everypar{\textbf{!}}A⏎⏎ZQX @@ exp:!
+## Contadores
+`\newcounter{c}` · `\newcounter{c}[pai]` · `\setcounter{c}{n}` @@ \newcounter{c}\setcounter{c}{5}\arabic{c} ZQX @@ exp:5
+`\addtocounter{c}{n}` · `\stepcounter{c}` · `\refstepcounter{c}` @@ \newcounter{c}\stepcounter{c}\stepcounter{c}\arabic{c} ZQX @@ exp:2
+`\arabic{c}` · `\roman{c}` · `\Roman{c}` · `\alph{c}` · `\Alph{c}` · `\fnsymbol{c}` · `\value{c}` @@ \newcounter{c}\setcounter{c}{4}\roman{c} ZQX @@ exp:iv
+`\thec` (apresentação do contador) · `\renewcommand{\thesection}{\Roman{section}}` @@ \renewcommand{\thesection}{\Roman{section}}\section{S}\thesection ZQX @@ exp:I
+`\numberwithin{equation}{section}` (amsmath) · `\counterwithin{c}{pai}` · `\counterwithout` (chngcntr) @@ \usepackage{chngcntr}\counterwithin{figure}{section}ZQX @@ ign
+`\setcounter{section}{n}` · `\setcounter{chapter}{n}` · `\setcounter{page}{n}` · `\setcounter{equation}{n}` · `\setcounter{footnote}{n}` @@ \setcounter{section}{4}\section{S}ZQX @@ h:1
+`\setcounter{secnumdepth}` · `\setcounter{tocdepth}` · `\setcounter{totalnumber}` @@ \setcounter{tocdepth}{1}ZQX @@ ign
+`\the\value` · `\number` · `\romannumeral` · `\ifnum\value{c}>3` @@ \newcounter{c}\setcounter{c}{2}\ifnum\value{c}>1 ZQX\fi @@ exp:ZQX
+`\addtocontents{lof}{}` · `\addcontentsline{lot}{table}{}` · `\newcounter{contador}[section]` zera sozinho @@ \newcounter{c}[section]\section{S}\arabic{c} ZQX @@ exp:0
+Contador `enumi` `enumii` `enumiii` `enumiv` · `page` · `equation` · `figure` · `table` · `footnote` · `mpfootnote` · `part` · `chapter` · `section` … `subparagraph` @@ \setcounter{page}{3}\arabic{page} ZQX @@ exp:3
+`\totalcount` · `\lastpage` · `\pageref{LastPage}` (lastpage) · `zref-totpages` @@ \usepackage{lastpage}\pageref{LastPage} ZQX @@ campo:paginas
+# Matemática (LaTeX, amsmath, amssymb, mathtools)
+>A fórmula é composta pelo motor `featheroffice/crates/feather-math` (algoritmo do TeX, fonte Latin Modern Math com a tabela
+>OpenType MATH). Critério `math`: o leitor reconhece a fórmula **e** o `feather-math` a monta sem comando desconhecido e sem
+>caractere que falte na fonte (`feather_math::desconhecidos`); se sobra algum, `[~]` com o nome dele. Desenho conferido por foto.
+@cls article
+@pkg amsmath,amssymb,mathtools
+## Modos e delimitação
+`$…$` (fórmula na linha) @@ $ZQX+1$ @@ math
+`\(…\)` @@ \(ZQX+1\) @@ math
+`$$…$$` (fórmula em destaque, TeX) @@ $$ZQX+1$$ @@ math
+`\[…\]` @@ \[ZQX+1\] @@ math
+`equation` (numerada) @@ \begin{equation}ZQX\end{equation} @@ math
+`equation*` @@ \begin{equation*}ZQX\end{equation*} @@ math
+`displaymath` · `math` (ambientes) @@ \begin{displaymath}ZQX\end{displaymath} @@ math
+`eqnarray` · `eqnarray*` (antigo) @@ \begin{eqnarray}ZQX&=&1\end{eqnarray} @@ math
+`\displaystyle` · `\textstyle` · `\scriptstyle` · `\scriptscriptstyle` @@ $\displaystyle ZQX \frac{a}{b} \textstyle \frac{a}{b} \scriptstyle x \scriptscriptstyle y$ @@ math
+`\text{}` · `\textrm{}` · `\mbox{}` · `\intertext{}` (texto dentro da fórmula) @@ \begin{align}ZQX \text{a} \textrm{b} \mbox{c} \\ \intertext{e} y&=2\end{align} @@ math
+`\ensuremath{}` (comando que funciona em texto e fórmula) @@ \ensuremath{ZQX} @@ math
+`\everymath{}` · `\everydisplay{}` · `\abovedisplayskip` · `\belowdisplayskip` · `\abovedisplayshortskip` · `\jot` @@ \setlength{\abovedisplayskip}{2pt}$ZQX$ @@ math
+`\(` com `\label` e referência (`\eqref`) @@ \begin{equation}ZQX\label{e}\end{equation}\eqref{e} @@ math
+`\ifmmode` · `\mathchoice` · `\mathsurround` @@ $ZQX$ @@ math
+## Índices, expoentes, frações e raízes
+Expoente `x^2` e índice `x_i` · `x_i^2` · `x^{a^b}` · `x_{i_j}` @@ $ZQX^2_i$ @@ math
+Apóstrofo (derivada) `f'` `f''` e `x^\prime` · `\prime` @@ $ZQX'' $ @@ math
+`\frac{a}{b}` · `\dfrac` · `\tfrac` · `\cfrac` (fração contínua) @@ $\frac{ZQX}{2} \dfrac{a}{b} \tfrac{a}{b} \cfrac{1}{1+\cfrac{1}{x}}$ @@ math
+`\binom` · `\dbinom` · `\tbinom` · `\genfrac{}{}{}{}{}{}` · `\choose` · `\over` · `\atop` @@ $\binom{ZQX}{2} \dbinom{n}{k} \tbinom{n}{k} \genfrac{(}{)}{0pt}{}{a}{b} {n \choose k} {a \over b} {a \atop b}$ @@ math
+`\sqrt{x}` · `\sqrt[n]{x}` · `\surd` @@ $\sqrt[3]{ZQX}$ @@ math
+`\overset{a}{b}` · `\underset{a}{b}` · `\stackrel{a}{b}` · `\substack{a\\b}` · `\overbrace` · `\underbrace` com legenda `^{}` `_{}` @@ $\overset{a}{ZQX} \underset{b}{c} \stackrel{d}{=} \sum_{\substack{i\\j}} \overbrace{x+y}^{n} \underbrace{u+v}_{m}$ @@ math
+`\xrightarrow[sob]{sobre}` · `\xleftarrow` · `\xlongequal` · `\xRightarrow` (mathtools) · `\xhookrightarrow` @@ $A \xrightarrow[b]{ZQX} B \xleftarrow{c} C \xlongequal{d} D \xRightarrow{e} E \xhookrightarrow{f} F$ @@ math
+`\sideset{_a^b}{_c^d}\sum` · `\tensor` · `\prescript{a}{b}{X}` (mathtools/tensor) @@ $\sideset{_a^b}{_c^d}\sum ZQX \tensor{T}{^a_b} \prescript{a}{b}{X}$ @@ math
+`\mathclap` · `\mathllap` · `\mathrlap` · `\smashoperator` (mathtools) @@ $\sum_{\mathclap{ZQX}} x \mathllap{a} \mathrlap{b} \smashoperator{\sum_{i}} y$ @@ math
+## Letras gregas e variantes
+Gregas minúsculas: `\alpha \beta \gamma \delta \epsilon \varepsilon \zeta \eta \theta \vartheta \iota \kappa \lambda \mu \nu \xi \pi \varpi \rho \varrho \sigma \varsigma \tau \upsilon \phi \varphi \chi \psi \omega` @@ $ZQX \alpha\beta\gamma\delta\epsilon\varepsilon\zeta\eta\theta\vartheta\iota\kappa\lambda\mu\nu\xi\pi\varpi\rho\varrho\sigma\varsigma\tau\upsilon\phi\varphi\chi\psi\omega$ @@ math
+Gregas maiúsculas: `\Gamma \Delta \Theta \Lambda \Xi \Pi \Sigma \Upsilon \Phi \Psi \Omega` @@ $ZQX \Gamma\Delta\Theta\Lambda\Xi\Pi\Sigma\Upsilon\Phi\Psi\Omega$ @@ math
+Gregas maiúsculas inclinadas (amsmath): `\varGamma \varDelta \varTheta \varLambda \varXi \varPi \varSigma \varUpsilon \varPhi \varPsi \varOmega` @@ $ZQX \varGamma\varDelta\varTheta\varLambda\varXi\varPi\varSigma\varUpsilon\varPhi\varPsi\varOmega$ @@ math
+Gregas extras (amssymb): `\digamma \varkappa \backepsilon` · hebraicas `\aleph \beth \gimel \daleth` @@ $ZQX \digamma\varkappa\aleph\beth\gimel\daleth$ @@ math
+Gregas em negrito `\boldsymbol{\alpha}` · `\bm{\alpha}` (bm) · `\pmb` @@ $\boldsymbol{ZQX\alpha}$ @@ math
+Letras diversas: `\ell \hbar \imath \jmath \wp \Re \Im \mho \eth \Bbbk \complement \partial \nabla \infty \emptyset \varnothing \angle \measuredangle \sphericalangle` @@ $ZQX \ell\hbar\imath\jmath\wp\Re\Im\mho\eth\partial\nabla\infty\emptyset\varnothing$ @@ math
+## Alfabetos de fórmula
+`\mathrm{}` · `\mathbf{}` · `\mathit{}` · `\mathsf{}` · `\mathtt{}` · `\mathnormal{}` @@ $\mathbf{ZQX}\mathrm{d}x \mathit{ab} \mathsf{A} \mathtt{x} \mathnormal{y}$ @@ math
+`\mathbb{R}` (quadro-negro, amssymb) · `\mathbbm` · `\mathds` @@ $\mathbb{ZQX RNZQC}$ @@ math
+`\mathcal{L}` (caligráfico) · `\mathscr{L}` (mathrsfs) · `\mathfrak{g}` (eufrak) @@ $\mathcal{ZQX L}\mathfrak{g}\mathscr{F}$ @@ math
+`\mathbf` + `\boldsymbol` + `\bm` + `\mathversion{bold}` + `\boldmath` @@ $\bm{ZQX}$ @@ math
+`\operatorname{}` · `\operatorname*{}` · `\DeclareMathOperator{\sen}{sen}` · `\DeclareMathOperator*` · `\mathop` @@ \DeclareMathOperator{\sen}{sen}$\sen ZQX \operatorname{tr} A \operatorname*{arg\,max}_x f \mathop{\mathrm{Res}} g$ @@ math
+`\mathord` · `\mathbin` · `\mathrel` · `\mathopen` · `\mathclose` · `\mathpunct` · `\mathinner` (classes) @@ $a \mathrel{ZQX} b \mathord{+} \mathbin{\star} \mathopen{[} x \mathclose{]} \mathpunct{;} \mathinner{\ldots}$ @@ math
+`\DeclareMathAlphabet` · `\SetMathAlphabet` · `\setmathfont` (unicode-math) @@ $ZQX$ @@ math
+## Funções e operadores nomeados
+`\sin \cos \tan \cot \sec \csc \arcsin \arccos \arctan \sinh \cosh \tanh \coth` @@ $ZQX \sin x \cos x \tan x \cot x \sec x \csc x \arcsin x \sinh x$ @@ math
+`\log \ln \lg \exp \deg \det \dim \gcd \hom \ker \arg \Pr` @@ $ZQX \log x \ln x \lg x \exp x \deg \det \dim \gcd \hom \ker \arg \Pr$ @@ math
+`\lim \limsup \liminf \max \min \sup \inf \varlimsup \varliminf \varinjlim \varprojlim` com limites embaixo @@ $\lim_{ZQX \to 0} f \limsup_{n} a_n \liminf_n b_n \max_i x_i \min_j y_j \sup_k c \inf_k d \varlimsup_n e \varliminf_n g \varinjlim h \varprojlim k$ @@ math
+`\bmod` · `\pmod{n}` · `\mod` · `\pod` @@ $a \equiv b \pmod{ZQX} \quad a \bmod b \quad a \mod{n} \quad x \pod{m}$ @@ math
+`\mathop{\rm sen}` · `\mathrm{sen}` (função em português: sen, tg, cossec) @@ $\mathrm{sen}\, ZQX$ @@ math
+## Operadores grandes
+`\sum` `\prod` `\coprod` com limites `_{}` `^{}` · `\limits` · `\nolimits` @@ $\sum_{i=1}^{ZQX} i \prod_{k} a_k \coprod_j B_j \sum\limits_i x \sum\nolimits_i y$ @@ math
+`\int` `\iint` `\iiint` `\iiiint` `\idotsint` `\oint` `\oiint` `\oiiint` `\intop` @@ $\int_0^{ZQX} f\,dx \iint g \iiint h \iiiint k \idotsint m \oint n \oiint p \oiiint q \intop r$ @@ math
+`\bigcup` `\bigcap` `\bigsqcup` `\bigvee` `\bigwedge` `\bigoplus` `\bigotimes` `\bigodot` `\biguplus` @@ $\bigcup_{ZQX} A_i \bigcap B \bigsqcup C \bigvee D \bigwedge E \bigoplus F \bigotimes G \bigodot H \biguplus I$ @@ math
+`\smallint` · `\smallsum` · `\sumop` · `\intertext` · `\substack` · `\sideset` (limites especiais) @@ $\smallint ZQX \smallsum x \sum_{\substack{a\\b}} y \sideset{}{'}\sum_i z$ @@ math
+Limite em baixo vs. ao lado (`\displaystyle` · `\limits` · `\nolimits` · `\intlimits`) @@ $\int\limits_a^{ZQX} f \displaystyle \sum\nolimits_i x$ @@ math
+## Relações
+Igualdade e ordem: `= \ne \neq \equiv \not\equiv \sim \simeq \approx \cong \propto \doteq \asymp \le \leq \ge \geq \ll \gg \lll \ggg \leqslant \geqslant \lesssim \gtrsim \lessgtr \prec \succ \preceq \succeq` @@ $ZQX = \ne \equiv \sim \simeq \approx \cong \propto \le \ge \ll \gg \leqslant \geqslant \prec \succ$ @@ math
+Conjuntos: `\in \notin \ni \subset \supset \subseteq \supseteq \subsetneq \supsetneq \nsubseteq \sqsubset \sqsupset \sqsubseteq \sqsupseteq` @@ $ZQX \in \notin \ni \subset \supset \subseteq \supseteq \subsetneq$ @@ math
+Perpendicular e outras: `\perp \parallel \nparallel \mid \nmid \vdash \dashv \models \vDash \bowtie \smile \frown \between \pitchfork` @@ $ZQX \perp \parallel \nparallel \mid \nmid \vdash \dashv \models \vDash \bowtie \smile \frown \between \pitchfork$ @@ math
+Negação: `\not=` · `\not\in` · `\nless \ngtr \nleq \ngeq \nsim \ncong \nprec \nsucc \nvdash \nvDash` @@ $ZQX \not= \not\in \nless \ngtr \nleq \ngeq \nsim \ncong \nprec \nsucc \nvdash \nvDash$ @@ math
+`\because \therefore \triangleq \eqcirc \circeq \doteqdot \fallingdotseq \risingdotseq \bumpeq \Bumpeq \eqsim \backsim \thicksim \thickapprox` @@ $ZQX \because \therefore \triangleq \eqcirc \circeq \doteqdot \fallingdotseq \risingdotseq \bumpeq \Bumpeq \eqsim \backsim \thicksim \thickapprox$ @@ math
+`\coloneqq` · `\eqqcolon` · `\Coloneqq` · `\vcentcolon` (mathtools) · `\dblcolon` @@ $x \coloneqq ZQX \eqqcolon y \Coloneqq z \vcentcolon w \dblcolon v$ @@ math
+## Operadores binários
+`+ - \pm \mp \times \div \cdot \ast \star \circ \bullet \oplus \ominus \otimes \oslash \odot \setminus \cup \cap \sqcup \sqcap \vee \wedge \lor \land \uplus \amalg \wr \diamond \triangle \bigtriangleup \bigtriangledown` @@ $ZQX \pm \mp \times \div \cdot \ast \star \circ \bullet \oplus \otimes \cup \cap \vee \wedge$ @@ math
+amssymb binários: `\dotplus \ltimes \rtimes \leftthreetimes \rightthreetimes \barwedge \veebar \doublebarwedge \boxplus \boxminus \boxtimes \boxdot \circledast \circledcirc \circleddash \centerdot \intercal \divideontimes \smallsetminus \curlyvee \curlywedge \Cup \Cap` @@ $ZQX \dotplus \ltimes \rtimes \leftthreetimes \rightthreetimes \barwedge \veebar \doublebarwedge \boxplus \boxminus \boxtimes \boxdot \circledast \circledcirc \circleddash \centerdot \intercal \divideontimes \smallsetminus \curlyvee \curlywedge \Cup \Cap$ @@ math
+## Setas
+Simples: `\leftarrow \rightarrow \to \gets \leftrightarrow \uparrow \downarrow \updownarrow \nearrow \searrow \swarrow \nwarrow \mapsto \longmapsto \hookrightarrow \hookleftarrow \longrightarrow \longleftarrow \longleftrightarrow` @@ $ZQX \leftarrow \rightarrow \to \gets \leftrightarrow \uparrow \downarrow \updownarrow \nearrow \searrow \swarrow \nwarrow \mapsto \longmapsto \hookrightarrow \hookleftarrow \longrightarrow \longleftarrow \longleftrightarrow$ @@ math
+Duplas: `\Leftarrow \Rightarrow \Leftrightarrow \Uparrow \Downarrow \Updownarrow \Longrightarrow \Longleftarrow \Longleftrightarrow \implies \impliedby \iff` @@ $ZQX \Leftarrow \Rightarrow \Leftrightarrow \Longrightarrow \implies \iff$ @@ math
+amssymb: `\leadsto \rightsquigarrow \leftrightsquigarrow \twoheadrightarrow \twoheadleftarrow \rightarrowtail \leftarrowtail \rightleftarrows \leftrightarrows \rightrightarrows \leftleftarrows \upuparrows \downdownarrows \rightleftharpoons \leftrightharpoons \curvearrowright \curvearrowleft \circlearrowright \circlearrowleft \Rrightarrow \Lleftarrow \nrightarrow \nleftarrow \nRightarrow \nLeftarrow \nleftrightarrow \Lsh \Rsh \looparrowright \looparrowleft \multimap \dashrightarrow \dashleftarrow` @@ $ZQX \leadsto \rightsquigarrow \leftrightsquigarrow \twoheadrightarrow \twoheadleftarrow \rightarrowtail \leftarrowtail \rightleftarrows \leftrightarrows \rightrightarrows \leftleftarrows \upuparrows \downdownarrows \rightleftharpoons \leftrightharpoons \curvearrowright \curvearrowleft \circlearrowright \circlearrowleft \Rrightarrow \Lleftarrow \nrightarrow \nleftarrow \nRightarrow \nLeftarrow \nleftrightarrow \Lsh \Rsh \looparrowright \looparrowleft \multimap \dashrightarrow \dashleftarrow$ @@ math
+Arpões: `\leftharpoonup \leftharpoondown \rightharpoonup \rightharpoondown \upharpoonleft \upharpoonright \downharpoonleft \downharpoonright` · `\overleftarrow` · `\overrightarrow` · `\overleftrightarrow` · `\underrightarrow` @@ $ZQX \leftharpoonup \leftharpoondown \rightharpoonup \rightharpoondown \upharpoonleft \upharpoonright \downharpoonleft \downharpoonright \overleftarrow{a} \overrightarrow{AB} \overleftrightarrow{c} \underrightarrow{d}$ @@ math
+Extensíveis: `\xrightarrow` `\xleftarrow` `\xleftrightarrow` `\xmapsto` `\xlongequal` `\xtwoheadrightarrow` com texto em cima e embaixo @@ $A \xleftrightarrow{ZQX} B \xrightarrow{a} \xleftarrow{b} \xmapsto{c} \xlongequal{d} \xtwoheadrightarrow{e}$ @@ math
+Reações e equilíbrio: `\rightleftharpoons` · `\ce{<=>}` (mhchem) · `\xrightleftharpoons` @@ $A \rightleftharpoons ZQX B$ @@ math
+## Delimitadores
+Parênteses, colchetes, chaves: `( ) [ ] \{ \} \lbrace \rbrace \langle \rangle \lvert \rvert \lVert \rVert \lfloor \rfloor \lceil \rceil \lbrack \rbrack \vert \Vert | \|` @@ $ZQX ( ) [ ] \{ \} \langle \rangle \lvert x \rvert \lVert x \rVert \lfloor x \rfloor \lceil x \rceil$ @@ math
+`\left … \right` (delimitador que cresce) · `\left.` (invisível) · `\middle` @@ $\left( ZQX \middle| y \right]$ @@ math
+Tamanhos manuais: `\big \Big \bigg \Bigg` · `\bigl \bigr \Bigl \Bigr \biggl \biggr \Biggl \Biggr` · `\bigm` @@ $\Bigl( ZQX \Bigr) \big( \Big( \bigg( \Bigg( \bigl[ \bigr] \biggl\{ \biggr\} \Biggl| \Biggr| a \bigm| b$ @@ math
+Delimitadores pareados (mathtools): `\DeclarePairedDelimiter{\abs}{\lvert}{\rvert}` · `\abs*{}` · `\abs[\big]{}` @@ \DeclarePairedDelimiter{\abs}{\lvert}{\rvert}$\abs{ZQX}$ @@ math
+Delimitadores extensos: `\lgroup \rgroup \lmoustache \rmoustache \arrowvert \Arrowvert \bracevert \ulcorner \urcorner \llcorner \lrcorner` @@ $ZQX \lgroup x \rgroup \lmoustache y \rmoustache \arrowvert \Arrowvert \bracevert \ulcorner a \urcorner \llcorner b \lrcorner$ @@ math
+`\delimiter` · `\bigg\{` · `\left\{ … \right.` (casos manuais) · `\left\langle … \right\rangle` · `\langle x,y \rangle` @@ $\left\langle ZQX, y \right\rangle$ @@ math
+## Acentos e decoração
+Acentos curtos: `\hat \check \tilde \acute \grave \dot \ddot \dddot \ddddot \breve \bar \vec \mathring` @@ $\hat{ZQX} \check{a} \tilde{a} \acute{a} \grave{a} \dot{a} \ddot{a} \dddot{a} \breve{a} \bar{a} \vec{a} \mathring{a}$ @@ math
+Acentos largos: `\widehat \widetilde \overline \underline \overbrace \underbrace \overrightarrow \overleftarrow \underleftarrow \overleftrightarrow` @@ $\widehat{ZQX} \widetilde{abc} \overline{AB} \underline{x} \overbrace{a+b}^{n}$ @@ math
+`\not` · `\cancel` · `\bcancel` · `\xcancel` · `\cancelto` · `\boxed{}` · `\fbox` em fórmula · `\colorbox` em fórmula @@ $\boxed{ZQX} \not\equiv \cancel{a} \bcancel{b} \xcancel{c} \cancelto{0}{d} \fbox{e} \colorbox{yellow}{f}$ @@ math
+`\underbrace{…}_{texto}` · `\overbrace{…}^{texto}` · `\underbracket` · `\overbracket` (mathtools) @@ $\underbrace{ZQX}_{n} \overbrace{a}^{m} \underbracket{b} \overbracket{c}$ @@ math
+`\mathstrut` · `\vphantom` · `\hphantom` · `\phantom` · `\smash` · `\mathllap` @@ $\sqrt{\vphantom{x^2}ZQX} \mathstrut \hphantom{a} \phantom{b} \smash{c} \mathllap{d}$ @@ math
+## Reticências e pontos
+`\ldots \dots \cdots \vdots \ddots \iddots \dotsb \dotsc \dotsm \dotsi \dotso \hdotsfor{n}` @@ $ZQX \ldots \cdots \vdots \ddots \dotsb \dotsc$ @@ math
+`\cdot \cdotp \centerdot \colon \ldotp \mathellipsis` · `\: \,` · `:` (relação vs. pontuação) @@ $f\colon ZQX \to Y \cdot \cdotp \centerdot \ldotp \mathellipsis \: \,$ @@ math
+## Símbolos diversos
+Lógica e conjuntos: `\forall \exists \nexists \neg \lnot \top \bot \emptyset \varnothing \in \complement \setminus \cup \cap \mathbb{N} \mathbb{Z} \mathbb{Q} \mathbb{R} \mathbb{C}` @@ $ZQX \forall \exists \nexists \neg \lnot \top \bot \emptyset \varnothing \in \complement \setminus \cup \cap \mathbb{N} \mathbb{Z} \mathbb{Q} \mathbb{R} \mathbb{C}$ @@ math
+Cálculo: `\partial \nabla \infty \prime \Delta \int \oint \sum \prod \lim \sqrt \Re \Im \hbar` @@ $ZQX \partial \nabla \infty \prime \Delta \int \oint \sum \prod \lim \sqrt{x} \Re \Im \hbar$ @@ math
+Geometria: `\angle \measuredangle \sphericalangle \triangle \square \blacksquare \Box \Diamond \blacktriangle \blacktriangledown \blacklozenge \lozenge \bigstar \circ \bigcirc \diamond \parallel \perp` @@ $ZQX \angle \measuredangle \sphericalangle \triangle \square \blacksquare \Box \Diamond \blacktriangle \blacktriangledown \blacklozenge \lozenge \bigstar \circ \bigcirc \diamond \parallel \perp$ @@ math
+Cartas e outros: `\spadesuit \heartsuit \diamondsuit \clubsuit \flat \natural \sharp \checkmark \maltese \yen \circledR \circledS \S \P \dag \ddag` @@ $ZQX \spadesuit \heartsuit \diamondsuit \clubsuit \flat \natural \sharp \checkmark \maltese \yen \circledR \circledS \S \P \dag \ddag$ @@ math
+Teoria dos números: `\mid \nmid \equiv \pmod \gcd \lfloor \rfloor \lceil \rceil \left\lfloor \right\rfloor \sum_{d|n}` @@ $ZQX \mid \nmid \equiv \pmod{n} \gcd(a,b) \lfloor x \rfloor \lceil y \rceil \left\lfloor z \right\rfloor \sum_{d|n} d$ @@ math
+Unidades em fórmula: `\,\mathrm{m/s}` · `\mathrm{kg}` · `\si{}` (siunitx) · `\text{ m}` · `\qty{}{}` @@ $10\,\mathrm{ZQX m/s} \mathrm{kg} \si{\meter} \text{ m} \qty{3}{\second}$ @@ math
+Texto em fórmula: `\text{...}` · `\textnormal{}` · `\mbox{}` · `\intertext{}` · `\shortintertext{}` @@ \begin{align}ZQX \text{ para todo } x \textnormal{a} \mbox{b} \\ \intertext{c} y &= 1 \\ \shortintertext{d} z &= 2\end{align} @@ math
+Espaços matemáticos: `\, \: \; \! \ \quad \qquad \enspace \hspace{} \mkern \mskip \negthinspace \negmedspace \negthickspace \thinspace \medspace \thickspace` @@ $a\,ZQX\;b\quad c\qquad d\!e \enspace f \hspace{1em} g \mkern18mu h \mskip9mu i \negthinspace j \negmedspace k \negthickspace l \thinspace m \medspace n \thickspace o \: p \ q$ @@ math
+Barra de fração e traço: `\vline \hline \vert \| \Vert` em matriz · `\rule` em fórmula · `\dfrac{\,}{\,}` @@ $ZQX \vert x \Vert \| \begin{array}{c|c} a & b \\ \hline c & d \end{array} \rule{1em}{0.4pt} \dfrac{\,}{\,}$ @@ math
+Constantes de uso comum com `\mathrm{e}` `\mathrm{i}` `\mathrm{d}x` · diferencial `\,\mathrm{d}x` · `\partial_t` · `\frac{\partial f}{\partial x}` @@ $\frac{\partial ZQX}{\partial x}$ @@ math
+Unicode em fórmula (`α β ≤ ∑ ∫ →` direto, `unicode-math`) @@ $ZQX α β ≤ ∑ ∫ →$ @@ math
+## Matrizes e arranjos
+`matrix` (sem delimitador) @@ $\begin{matrix}ZQX&b\\c&d\end{matrix}$ @@ math
+`pmatrix` (parênteses) @@ $\begin{pmatrix}ZQX&b\\c&d\end{pmatrix}$ @@ math
+`bmatrix` (colchetes) · `Bmatrix` (chaves) @@ $\begin{bmatrix}ZQX&b\\c&d\end{bmatrix}$ @@ math
+`vmatrix` (barras) · `Vmatrix` (barras duplas) @@ $\begin{vmatrix}ZQX&b\\c&d\end{vmatrix}$ @@ math
+`smallmatrix` (matriz pequena na linha) · `psmallmatrix` · `bsmallmatrix` (mathtools) @@ $\left(\begin{smallmatrix}ZQX&b\\c&d\end{smallmatrix}\right)$ @@ math
+`array` com `{ccc}` e linhas `\hline` · `|c|` · `@{}` · `\\[2pt]` · `*{3}{c}` @@ $\begin{array}{c|c}ZQX&b\\\hline c&d\end{array}$ @@ math
+`cases` (sistema/por partes) · `dcases` · `rcases` · `drcases` · `cases*` (mathtools) @@ $f(x)=\begin{cases}ZQX & x>0\\ 0 & x\le 0\end{cases}$ @@ math
+`matrix*` · `pmatrix*` · `bmatrix*` com alinhamento `[r]` (mathtools) @@ $\begin{pmatrix*}[r]ZQX&b\\c&d\end{pmatrix*}$ @@ math
+`\hdotsfor{n}` · `\vdots` · `\ddots` dentro de matriz · `\cdots` @@ $\begin{pmatrix}ZQX&\cdots&b\\\vdots&\ddots&\vdots\end{pmatrix}$ @@ math
+`\substack` e `subarray` (condições empilhadas em `\sum`) @@ $\sum_{\begin{subarray}{l}ZQX\\i<j\end{subarray}} x$ @@ math
+`nicematrix`: `pNiceMatrix` · `\Block` · `\hline` · `\CodeBefore` · `\Vdots` (matriz com anotações) @@ \usepackage{nicematrix}$\begin{pNiceMatrix}ZQX&b\\c&d\end{pNiceMatrix}$ @@ math
+`blkarray` / `\begin{blockarray}` (rótulos de linha e coluna) · `\matrix`/`\bordermatrix` (plain TeX) @@ $\bordermatrix{&a&b\cr a&ZQX&1\cr}$ @@ math
+Determinantes e sistemas de equações com `aligned` dentro de `\left\{ … \right.` @@ $\left\{\begin{aligned}ZQX&=1\\ y&=2\end{aligned}\right.$ @@ math
+## Equações em várias linhas (amsmath)
+`align` (alinha em `&`, numera cada linha) @@ \begin{align}ZQX&=1\\ y&=2\end{align} @@ math
+`align*` @@ \begin{align*}ZQX&=1\\ y&=2\end{align*} @@ math
+`alignat` · `alignat*` (espaço entre colunas controlado) @@ \begin{alignat}{2}ZQX&=1&\quad y&=2\end{alignat} @@ math
+`flalign` · `flalign*` (alinha com as margens) @@ \begin{flalign}ZQX&=1\end{flalign} @@ math
+`gather` · `gather*` (centraliza cada linha) @@ \begin{gather}ZQX=1\\ y=2\end{gather} @@ math
+`multline` · `multline*` (equação longa em várias linhas) · `\shoveleft` · `\shoveright` @@ \begin{multline}ZQX+a\\ +b\end{multline} @@ math
+`split` (dentro de `equation`, uma só numeração) @@ \begin{equation}\begin{split}ZQX&=1\\&=2\end{split}\end{equation} @@ math
+`aligned` · `gathered` · `alignedat` (dentro de outras fórmulas, com `[t]` `[b]`) @@ $\begin{aligned}ZQX&=1\\y&=2\end{aligned}$ @@ math
+`subequations` (numeração 1a, 1b…) · `parentequation` @@ \begin{subequations}\begin{align}ZQX&=1\end{align}\end{subequations} @@ math
+`\tag{}` · `\tag*{}` · `\notag` · `\nonumber` (numeração manual e supressão) @@ \begin{equation}ZQX\tag{A}\end{equation} @@ math
+`\label{}` + `\eqref{}` · `\ref{}` · `\autoref{}` · `\cref{}` em equação · `\numberwithin{equation}{section}` @@ \begin{equation}ZQX\label{e}\end{equation}Veja \eqref{e}. @@ math
+`\intertext{}` · `\shortintertext{}` entre linhas · `\displaybreak` · `\allowdisplaybreaks` · `\\*` @@ \begin{align}ZQX&=1\intertext{e}y&=2 \displaybreak \\* \shortintertext{f} z &= 3\end{align}\allowdisplaybreaks @@ math
+`\MoveEqLeft` · `\mathllap` · `\mathrlap` · `\ArrowBetweenLines` · `\SwapAboveDisplaySkip` (mathtools) @@ \begin{align}\MoveEqLeft ZQX\\ &=1\end{align} @@ =~
+`\begin{equation}…\end{equation}` com `\left\{ \begin{array}…` e `\hfill` @@ \begin{equation}ZQX\end{equation} @@ math
+`dmath` (breqn: quebra automática) · `dgroup` · `dseries` @@ \usepackage{breqn}\begin{dmath}ZQX\end{dmath} @@ math
+`\begin{eqnarray}` com `\lefteqn{}` e `&=&` (antigo) @@ \begin{eqnarray}\lefteqn{ZQX}\\ &=&1\end{eqnarray} @@ math
+`empheq` (`\begin{empheq}[box=\fbox]{align}`) · `\boxed` em linha do `align` @@ \usepackage{empheq}\begin{empheq}[box=\fbox]{align}ZQX&=1\end{empheq} @@ math
+`cases` com `&` e `\text{se}` · numeração de `cases` com `numcases` · `\begin{cases}` aninhado @@ $\begin{cases}ZQX & \text{se } x>0\\ 0 & \text{caso contrário}\end{cases}$ @@ math
+Equações numeradas dentro de lista, tabela e `minipage` @@ \begin{itemize}\item $ZQX$\end{itemize} @@ item
+Fórmula dentro de título, legenda, nota e célula de tabela @@ \section{Área $ZQX^2$} @@ h:1
+Fórmula inline com quebra de linha permitida (`\allowbreak` · `\linebreak` · `\mathbin{}`) @@ $a+\allowbreak ZQX$ @@ math
+Fonte e tamanho da fórmula acompanham o corpo do texto (inline, display, script) · `\small` em fórmula · `\mathsurround` @@ {\small $ZQX$} @@ math
+## Símbolos de pacotes de ciência
+@pkg siunitx
+`siunitx`: `\SI{valor}{unidade}` · `\si{}` · `\num{}` · `\qty{}{}` · `\unit{}` · `\ang{}` · `\numlist` · `\numrange` · `\SIrange` · `\sisetup{}` @@ \SI{ZQX 10}{\meter\per\second} @@ txt:10
+`siunitx`: `\ohm` `\celsius` `\micro` `\degree` `\kilo` `\milli` `\mega` `\giga` `\per` `\squared` `\cubed` `\tothe{}` `\DeclareSIUnit` @@ \si{\kilo\gram\per\cubic\meter} ZQX @@ txt:kg
+@pkg physics
+`physics`: `\abs{}` `\norm{}` `\order{}` `\ket{}` `\bra{}` `\braket{}{}` `\dd` `\dv{}{}` `\pdv{}{}` `\grad` `\div` `\curl` `\laplacian` `\qty()` `\mqty()` `\Tr` `\rank` `\expval{}` `\comm{}{}` @@ $\dv{ZQX}{x} \ket{\psi} \bra{\phi} \abs{a} \norm{b} \order{c} \braket{a}{b} \dd{x} \pdv{f}{x} \grad f \curl F \laplacian u \qty(d) \mqty(1 & 2 \\ 3 & 4) \Tr A \rank B \expval{H} \comm{A}{B}$ @@ math
+@pkg braket
+`braket`: `\bra{}` `\ket{}` `\braket{}{}` `\Set{}` `\Bra{}` `\Ket{}` @@ $\braket{ZQX}{b} \bra{a} \ket{c} \Set{x} \Bra{y} \Ket{z}$ @@ math
+@pkg mhchem
+`mhchem`: `\ce{H2O}` · `\ce{A + B -> C}` · `\ce{^{14}C}` · `\ce{Fe^{3+}}` · `\ce{<=>}` · `\cee{}` @@ \ce{ZQX H2O + CO2 -> H2CO3} @@ txt:H2O
+@pkg chemformula
+`chemformula`: `\ch{H2O}` · `\chlabel` · `\chlewis` (alternativa ao mhchem) @@ \ch{ZQX H2O} @@ txt:H2O
+@pkg chemfig
+`chemfig`: `\chemfig{*6(-=-=-=)}` (estruturas moleculares, TikZ) @@ \chemfig{*6(-=-=-=)}ZQX
+@pkg tensor
+`tensor`: `\tensor{T}{^a_b}` · `\tensor*` · `\indices` · `\Tensor` @@ $\tensor{ZQX}{^a_b}$ @@ math
+@pkg cancel
+`cancel`: `\cancel{}` `\bcancel{}` `\xcancel{}` `\cancelto{}{}` `\CancelColor` @@ $\cancel{ZQX} \bcancel{a} \xcancel{b} \cancelto{0}{c}$ @@ math
+@pkg bm
+`bm`: `\bm{x}` · `\bm{\alpha}` · `\bmdefine` · `\boldsymbol` (negrito em fórmula) @@ $\bm{ZQX} \bm{\alpha} \boldsymbol{\beta}$ @@ math
+@pkg esint
+`esint`: `\oiint` `\iint` `\ointctrclockwise` `\varoint` `\sqint` `\fint` (integrais especiais) @@ $\oiint ZQX \iint a \ointctrclockwise b \varoint c \sqint d \fint e$ @@ math
+@pkg mathrsfs
+`mathrsfs`: `\mathscr{}` · `eucal` · `euscript` · `calrsfs` · `\mathbbm` (bbm) · `dsfont` `\mathds` @@ $\mathscr{ZQX}$ @@ math
+@pkg -
+# Pacotes — texto, página e cabeçalhos
+@cls article
+@pkg -
+## amsmath, amssymb, mathtools (opções e comandos fora de fórmula)
+@pkg amsmath
+`amsmath`: opções `leqno` `fleqn` `intlimits` `sumlimits` `namelimits` `nointlimits` `tbtags` `centertags` @@ ZQX
+`amsmath`: `\numberwithin{equation}{section}` @@ \numberwithin{equation}{section}ZQX @@ ign
+`amsmath`: `\text{}` e `\tag{}` em `equation` · `\eqref` · `\boldsymbol` · `\binom` · `\operatorname` @@ \begin{equation}ZQX\tag{x}\end{equation} @@ math
+`amsmath`: `\allowdisplaybreaks[1]` @@ \allowdisplaybreaks[1]ZQX @@ ign
+`amsmath`: `\DeclareMathOperator` · `\DeclareMathSymbol` · `\mathbf` @@ \DeclareMathOperator{\sen}{sen}ZQX @@ ign
+@pkg amssymb
+`amssymb` (inclui `amsfonts`): `\mathbb` `\mathfrak` `\square` `\blacksquare` `\checkmark` `\therefore` `\because` @@ $\mathbb{ZQX}\blacksquare$ @@ math
+@pkg mathtools
+`mathtools`: `\mathtoolsset{showonlyrefs}` · `\coloneqq` · `\DeclarePairedDelimiter` · `\prescript` · `\xrightarrow` · `\MoveEqLeft` · `\shortintertext` · `multlined` · `lgathered` · `rgathered` @@ \mathtoolsset{showonlyrefs}ZQX @@ ign
+`mathtools`: `\begin{multlined}[b][5cm]` @@ $\begin{multlined}ZQX \\ b\end{multlined}$ @@ math
+@pkg amsthm
+## amsthm — teoremas
+`\newtheorem{teo}{Teorema}` + `\begin{teo}…\end{teo}` @@ \newtheorem{teo}{Teorema}\begin{teo}ZQX\end{teo} @@ txt:Teorema
+`\newtheorem{lema}[teo]{Lema}` (contador compartilhado) @@ \newtheorem{teo}{Teorema}\newtheorem{lema}[teo]{Lema}\begin{lema}ZQX\end{lema} @@ txt:Lema
+`\newtheorem{def}{Definição}[section]` (numera por seção) @@ \newtheorem{def}{Definição}[section]\section{S}\begin{def}ZQX\end{def} @@ txt:Definição
+`\newtheorem*{obs}{Observação}` (sem número) @@ \newtheorem*{obs}{Observação}\begin{obs}ZQX\end{obs} @@ txt:Observação
+`\begin{teo}[Nome]` (título entre colchetes) @@ \newtheorem{teo}{Teorema}\begin{teo}[Pitágoras]ZQX\end{teo} @@ txt:Pitágoras
+`proof` — "Demonstração." com o quadradinho final @@ \begin{proof}ZQX\end{proof} @@ txt:ZQX
+`proof` com `[título]` (`\begin{proof}[Prova do lema]`) · `\qedhere` · `\qedsymbol` · `\renewcommand{\proofname}{Prova}` @@ \begin{proof}[Prova do lema]ZQX\end{proof} @@ txt:Prova do lema
+`\theoremstyle{plain|definition|remark}` @@ \theoremstyle{definition}\newtheorem{def}{Definição}\begin{def}ZQX\end{def} @@ txt:Definição
+`\newtheoremstyle{}` (estilo próprio) · `\swapnumbers` · `\thmname` `\thmnumber` `\thmnote` @@ \newtheoremstyle{x}{3pt}{3pt}{\itshape}{}{\bfseries}{.}{ }{}\theoremstyle{x}\newtheorem{t}{T}\begin{t}ZQX\end{t} @@ txt:T
+`thmtools`: `\declaretheorem[name=]{}` · `\listoftheorems` @@ \usepackage{thmtools}\declaretheorem[name=Teorema]{teo}\begin{teo}ZQX\end{teo} @@ txt:Teorema
+`ntheorem` · `aliascnt` (`\aliascntresetthe`) · `cleveref` + teoremas · `\crefname{teo}{teorema}{teoremas}` @@ \newtheorem{teo}{Teorema}\begin{teo}\label{t}ZQX\end{teo}\ref{t} @@ txt:1
+`tcolorbox` + teoremas (`tcbtheorem`) · `mdframed` + `\newmdtheoremenv` @@ \newtheorem{teo}{Teorema}\begin{teo}ZQX\end{teo} @@ txt:Teorema
+@pkg -
+## hyperref
+@pkg hyperref
+`hyperref` (links clicáveis em sumário, `\ref`, `\cite`, URLs) @@ \section{S}\label{s}\ref{s} ZQX @@ link
+`\hypersetup{colorlinks=true,linkcolor=,urlcolor=,citecolor=}` @@ \hypersetup{colorlinks=true,urlcolor=red}\url{http://x.org/ZQX} @@ link
+`\hypersetup{pdftitle=,pdfauthor=,pdfsubject=,pdfkeywords=,pdfcreator=}` @@ \hypersetup{pdftitle={T},pdfauthor={A}}ZQX @@ titulo
+`hyperref` opções de carregamento: `[hidelinks]` `[colorlinks]` `[breaklinks]` `[bookmarks]` `[bookmarksnumbered]` `[pdfborder=0 0 0]` `[unicode]` `[pdfstartview=FitH]` `[linktoc=all]` @@ ZQX @@ ign
+`\href{url}{texto}` @@ \href{http://x.org}{ZQX} @@ link
+`\url{}` / `\nolinkurl{}` / `\path{}` @@ \url{http://x.org/ZQX} @@ link
+`\hyperref[rótulo]{texto}` @@ \section{S}\label{s}\hyperref[s]{ZQX} @@ link
+`\hypertarget{}{}` · `\hyperlink{}{}` @@ \hypertarget{a}{alvo}\hyperlink{a}{ZQX} @@ link
+`\autoref{}` · `\nameref{}` · `\pageref{}` · `\autopageref` · `\Autoref` · `\figureautorefname` `\sectionautorefname` (nomes em pt-BR) @@ \section{S}\label{s}\autoref{s} ZQX @@ txt:Seção
+`\texorpdfstring{}{}` · `\pdfstringdefDisableCommands` · `\phantomsection` @@ \section{\texorpdfstring{ZQX}{pdf}} @@ h:1
+`\pdfbookmark[nível]{texto}{nome}` · `\currentpdfbookmark` · `\belowpdfbookmark` @@ \pdfbookmark[1]{T}{t}ZQX @@ ign
+`\hypersetup{allcolors=}` · `\urlstyle{same}` · `\hypersetup{bookmarksopen}` @@ \hypersetup{allcolors=blue}ZQX @@ ign
+`\href{run:arquivo}{}` · `\href{mailto:}{}` · `\href{tel:}{}` · anexos `\attachfile` (`attachfile`) @@ \href{mailto:a@b.c}{ZQX} @@ link
+`\Acrobatmenu` · campos de formulário `\TextField` `\CheckBox` `\ChoiceMenu` `\PushButton` `\begin{Form}` @@ \begin{Form}\TextField{ZQX}\end{Form} @@ ign
+`hyperxmp` · `bookmark` (`\bookmarksetup`) · `pdfx` (PDF/A) · `\hypersetup{pdfa}` @@ \usepackage{bookmark}ZQX @@ ign
+`url`: `\url{}` · `\urlstyle{rm}` · `\UrlBreaks` · `\Urlmuskip` · `\path{}` @@ \usepackage{url}\url{http://x.org/ZQX} @@ link
+@pkg -
+## babel e idioma
+@pkg babel
+`\usepackage[brazil]{babel}` (português do Brasil: "Sumário", "Figura", "Referências", data) @@ \tableofcontents @@ sum
+`\usepackage[portuguese]{babel}` · `[brazilian]` · `[english]` · `[spanish]` · `[french]` · `[german]` · `[main=brazil]` @@ ZQX
+`\selectlanguage{english}` · `\begin{otherlanguage}{}` · `\foreignlanguage{}{}` · `\babeltags` · `\babelprovide` @@ \usepackage[english,brazil]{babel}\selectlanguage{english}ZQX
+`\languagename` · `\iflanguage{}{}{}` · `\captionsbrazil` · `\datebrazil` · `\brazilhyphenmins` · `\extrasbrazil` @@ \languagename ZQX
+`babel`: `\shorthandon{"}` · `"-` `"|` `"~` `"=` atalhos de hifenização · `\languageshorthands` · `\defineshorthand` @@ ZQX "- @@ txt:ZQX
+`babel`: textos fixos (`\contentsname`, `\listfigurename`, `\listtablename`, `\bibname`, `\refname`, `\abstractname`, `\figurename`, `\tablename`, `\appendixname`, `\partname`, `\chaptername`, `\indexname`) em pt-BR @@ \listoffigures @@ lof
+@pkg polyglossia
+`polyglossia` (XeLaTeX): `\setmainlanguage{portuguese}` · `\setotherlanguage{}` · `\textenglish{}` @@ \setmainlanguage{portuguese}ZQX
+@pkg -
+`inputenc`: `[utf8]` `[latin1]` `[ansinew]` `\inputencoding` · UTF-8 nativo no LuaLaTeX/XeLaTeX @@ \usepackage[utf8]{inputenc}ação ZQX @@ txt:ação
+`fontenc`: `[T1]` `[OT1]` `[T2A]` `[LGR]` `[EU1]` `[EU2]` · `\DeclareFontEncoding` @@ \usepackage[T1]{fontenc}ZQX @@ ign
+`lmodern` · `cmbright` · `gensymb` · `textcomp` · `upgreek` (`\upalpha`) · `lmodern` + `T1` @@ \usepackage{gensymb}\degree ZQX @@ txt:°
+`iftex` · `ifxetex` · `ifluatex` · `ifpdf` @@ \usepackage{iftex}ZQX @@ ign
+## microtype, fontspec e fontes
+@pkg microtype
+`microtype`: `\microtypesetup{protrusion=true,expansion=true,tracking=true,kerning=true,spacing=true}` · `\textls{}` (espaçamento entre letras) · `\lsstyle` @@ \microtypesetup{protrusion=true}ZQX @@ ign
+`microtype`: `\textls[50]{ZQX}` @@ \textls[50]{ZQX} @@ txt:ZQX
+@pkg fontspec
+`fontspec`: `\setmainfont{Nome}[Ligatures=TeX]` · `\setsansfont` · `\setmonofont` · `\newfontfamily\x{Nome}` · `\fontspec{}` · `\defaultfontfeatures` @@ \setmainfont{Times New Roman}ZQX
+`fontspec`: `\addfontfeatures{}` · `Scale=` · `Numbers=OldStyle` · `SmallCapsFeatures` · `UprightFont=` · `BoldFont=` · `ItalicFont=` · `Path=` @@ \addfontfeatures{Scale=1.2}ZQX
+@pkg lmodern
+`lmodern` (padrão do Overleaf) @@ ZQX @@ ign
+@pkg times
+`times` · `mathptmx` · `newtxtext,newtxmath` (Times) @@ ZQX
+@pkg helvet
+`helvet` · `[scaled=0.92]` · `\sfdefault` · `\familydefault` @@ \renewcommand{\familydefault}{\sfdefault}ZQX @@ sf
+@pkg -
+`palatino` · `mathpazo` · `bookman` · `newcent` · `charter` · `utopia` · `fourier` · `libertine` · `kpfonts` · `gentium` · `tgpagella` · `tgtermes` · `roboto` · `inter` · `sourcesanspro` · `opensans` · `fira` @@ \usepackage{mathpazo}ZQX
+`DejaVu` · `FiraMono` · `inconsolata` · `courier` · `beramono` · `txtt` (monoespaçadas) @@ \usepackage{inconsolata}ZQX
+## fancyhdr — cabeçalho e rodapé
+@pkg fancyhdr
+`\pagestyle{fancy}` @@ \pagestyle{fancy}ZQX
+`\fancyhead[L|C|R]{texto}` · `\lhead` `\chead` `\rhead` @@ \pagestyle{fancy}\fancyhead[L]{ZQX} @@ cab:ZQX
+`\fancyfoot[L|C|R]{texto}` · `\lfoot` `\cfoot` `\rfoot` @@ \pagestyle{fancy}\fancyfoot[C]{ZQX} @@ rod:ZQX
+`\fancyhf{}` (limpa tudo) · `\fancyhead[LE,RO]{}` (páginas par/ímpar) @@ \pagestyle{fancy}\fancyhf{}\rhead{ZQX} @@ cab:ZQX
+`\thepage` · `\leftmark` · `\rightmark` · `\nouppercase` · `\thesection` dentro de cabeçalho @@ \pagestyle{fancy}\fancyhead[R]{ZQX \thepage} @@ cab:ZQX
+`\headrulewidth` · `\footrulewidth` (réguas) · `\headrule` · `\footrule` @@ \pagestyle{fancy}\renewcommand{\headrulewidth}{0pt}\rhead{ZQX} @@ cab:ZQX
+`\fancypagestyle{nome}{…}` · `\thispagestyle{nome}` · redefinir `plain` @@ \fancypagestyle{plain}{\fancyhf{}\cfoot{ZQX}}\thispagestyle{plain} @@ rod:ZQX
+`\headheight` · `\setlength{\headheight}{}` · `\addtolength{\headheight}{}` · `\fancyheadoffset` · `\fancyfootoffset` @@ \setlength{\headheight}{15pt}ZQX @@ ign
+`\markboth` · `\markright` · `\chaptermark` · `\sectionmark` · `\renewcommand{\sectionmark}[1]{\markright{#1}}` @@ \pagestyle{fancy}\renewcommand{\sectionmark}[1]{\markright{#1}}\rhead{\rightmark ZQX}\section{S} @@ cab:ZQX
+`fancyhdr` + `lastpage`: "Página \thepage\ de \pageref{LastPage}" @@ \usepackage{lastpage}\pagestyle{fancy}\cfoot{Página \thepage\ de \pageref{LastPage} ZQX} @@ rod:ZQX
+`fancyhdr` + `\includegraphics` no cabeçalho (logotipo) @@ \usepackage{graphicx}\pagestyle{fancy}\lhead{\includegraphics[width=1cm]{a.png}ZQX} @@ cab:ZQX
+`scrlayer-scrpage` (KOMA): `\ihead` `\chead` `\ohead` `\ifoot` `\cfoot` `\ofoot` · `\pagestyle{scrheadings}` @@ \usepackage{scrlayer-scrpage}\pagestyle{scrheadings}\ohead{ZQX} @@ cab:ZQX
+@pkg lastpage
+`lastpage`: `\pageref{LastPage}` · `\pageref*{LastPage}` · `zref-totpages` `\ztotpages` @@ Total \pageref{LastPage} ZQX @@ campo:paginas
+@pkg fancyhdr
+`\pagenumbering{roman}` com `fancyhdr` · `\pagenumbering{gobble}` (sem número) @@ \pagenumbering{gobble}ZQX
+`\fancyhead` com `\hfill` e régua com `\rule` · cabeçalho em duas linhas com `\\` · `\headrulewidth` colorida (`\renewcommand{\headrule}`) @@ \pagestyle{fancy}\fancyhead[C]{A\\ZQX} @@ cab:ZQX
+@pkg -
+## titlesec — títulos de seção
+@pkg titlesec
+`\titleformat{\section}{fonte}{rótulo}{sep}{antes}` · `\titleformat{\chapter}[display]{…}` @@ \titleformat{\section}{\Large\bfseries}{\thesection}{1em}{}\section{ZQX} @@ h:1
+`\titlespacing{\section}{esq}{antes}{depois}` · `\titlespacing*` @@ \titlespacing*{\section}{0pt}{10pt}{5pt}\section{ZQX} @@ h:1
+`\titleformat` com `\color` · `\titlerule` · `\hrule` · `\filright` `\filcenter` `\filleft` (alinhamento do título) @@ \usepackage{xcolor}\titleformat{\section}{\color{red}\bfseries}{}{0pt}{}\section{ZQX} @@ h:1&cor
+`\titleclass` · `\titleformat{name=\section,numberless}` · `\assignpagestyle` · `\newpagestyle` · `\sethead` · `\setfoot` @@ \titleformat{\section}{\bfseries}{}{0pt}{}\section*{ZQX} @@ h:1
+`sectsty`: `\sectionfont{\color{red}}` · `\allsectionsfont{\sffamily}` · `\chapterfont` @@ \usepackage{sectsty}\sectionfont{\Large}\section{ZQX} @@ h:1
+`titletoc`: `\titlecontents{section}[1.5em]{}{}{}{\titlerule*[.5pc]{.}\contentspage}` @@ \usepackage{titletoc}\titlecontents{section}[0em]{}{}{}{}\tableofcontents @@ sum
+`\@startsection` · `\renewcommand\section{\@startsection…}` (redefinição manual) @@ \makeatletter\renewcommand\section{\@startsection{section}{1}{0pt}{1ex}{1ex}{\bfseries}}\makeatother\section{ZQX} @@ h:1
+`secdot` · `\renewcommand{\thesection}{\arabic{section}.}` (ponto depois do número) @@ \renewcommand{\thesection}{\arabic{section}.}\section{ZQX} @@ h:1
+`\section` com `\MakeUppercase` (ABNT: seção primária em caixa alta) @@ \section{\MakeUppercase{ZQX}} @@ h:1
+@pkg -
+## tocloft — sumário e listas
+@pkg tocloft
+`\renewcommand{\cftsecfont}{\bfseries}` · `\cftchapfont` · `\cftsubsecfont` · `\cftsecpagefont` @@ \renewcommand{\cftsecfont}{\bfseries}\tableofcontents @@ sum
+`\cftsetindents{section}{1em}{2em}` · `\cftsecindent` · `\cftsecnumwidth` · `\cftdotsep` · `\cftsecleader` @@ \cftsetindents{section}{1em}{2em}\tableofcontents @@ sum
+`\setlength{\cftbeforesecskip}{}` · `\cftbeforechapskip` · `\cftafterloftitleskip` · `\cftbeforetoctitleskip` @@ \setlength{\cftbeforesecskip}{3pt}\tableofcontents @@ sum
+`\renewcommand{\contentsname}{Sumário}` · `\cfttoctitlefont` · `\cftaftertoctitle` · `\listfigurename` · `\renewcommand{\cftfigpresnum}{Figura }` @@ \renewcommand{\contentsname}{Índice}\tableofcontents @@ sum
+`\newlistof{quadros}{loq}{Lista de Quadros}` · `\listofquadros` @@ \newlistof{quadros}{loq}{Quadros}\listofquadros
+`\tableofcontents` com `\setcounter{tocdepth}{3}` e `\addcontentsline` de seções sem número @@ \setcounter{tocdepth}{3}\tableofcontents @@ sum
+`minitoc` (`\dominitoc` `\minitoc`) · `\localtableofcontents` (`etoc`) · `\etocsettocstyle` @@ \usepackage{minitoc}\dominitoc\tableofcontents @@ sum
+`\tableofcontents` agrupando apêndices/anexos (`appendix`: `\appendixpage` `\addappheadtotoc`) @@ \usepackage{appendix}\appendix\appendixpage\section{ZQX} @@ h:1
+@pkg -
+## parskip, indentfirst, setspace, ragged2e, microtype
+@pkg parskip
+`parskip`: `[parfill]` `[skip=]` `[indent=]` · `\parskip` · `\parindent` @@ ZQX⏎⏎B @@ nblocos2
+@pkg ragged2e
+`ragged2e`: `\RaggedRight` `\RaggedLeft` `\Centering` `\justifying` · `\setlength{\RaggedRightRightskip}{}` · `\DelayedRaggedRight` @@ \Centering ZQX @@ centro
+@pkg ifthen
+`ifthen`: `\ifthenelse` · `\whiledo` · `\newboolean` · `\setboolean` · `\equal` · `\lengthtest` · `\isodd` @@ \ifthenelse{\equal{a}{a}}{ZQX}{não} @@ txt:ZQX
+@pkg calc
+`calc`: `\setcounter{c}{2*3+1}` · `\setlength{\a}{(\textwidth-1cm)/2}` · `\widthof` · `\heightof` · `\depthof` · `\ratio` · `\real` @@ \newcounter{c}\setcounter{c}{2*3+1}\arabic{c} ZQX @@ txt:7
+@pkg lipsum
+`lipsum`: `\lipsum` · `\lipsum[1-3]` · `\lipsum[2][1-2]` · `\setlipsum` @@ \lipsum[1] @@ nblocos2
+@pkg blindtext
+`blindtext`: `\blindtext` · `\Blindtext` · `\blindmathtrue` · `\blinddocument` @@ \blindtext @@ nblocos2
+@pkg appendix
+`appendix`: `\appendix` · `\begin{appendices}` · `\appendixpage` · `\addappheadtotoc` · `\appendixname` · `\noappendicestocpagenum` @@ \begin{appendices}\section{ZQX}\end{appendices} @@ h:1
+@pkg footmisc
+`footmisc`: `[bottom]` `[perpage]` `[symbol]` `[para]` `[hang]` `[stable]` `[multiple]` · `\footnotelayout` · `\setfnsymbol` @@ A\footnote{ZQX} @@ marca:nota
+@pkg etoolbox
+`etoolbox`: `\AtEndPreamble` · `\AtBeginEnvironment{}{}` · `\AtEndEnvironment` · `\BeforeBeginEnvironment` · `\apptocmd` · `\patchcmd` · `\csdef` · `\ifdef` · `\ifdefstring` · `\forcsvlist` · `\newtoggle` `\toggletrue` `\iftoggle` @@ \AtBeginEnvironment{quote}{\bfseries}\begin{quote}ZQX\end{quote} @@ b
+@pkg xparse
+`xparse`: `\NewDocumentCommand` · `\NewDocumentEnvironment` · `\DeclareDocumentCommand` · `\IfNoValueTF` · `\IfBooleanTF` · `\IfValueT` · `\ProcessKeyOptions` · `\SplitList` · `\TrimSpaces` @@ \NewDocumentCommand{\meu}{m}{<#1>}\meu{ZQX} @@ txt:<ZQX>
+@pkg xstring
+`xstring`: `\IfSubStr{}{}{}{}` · `\IfBeginWith` · `\IfEndWith` · `\IfEq` · `\IfStrEq` · `\StrBefore` · `\StrBehind` · `\StrBetween` · `\StrChar` · `\StrCut` · `\StrLen` · `\StrMid` · `\StrRemoveBraces` · `\StrSubstitute` · `\StrCount` · `\StrGobbleLeft` · `\StrLeft` · `\StrRight` @@ \IfSubStr{abc}{b}{ZQX}{não} @@ txt:ZQX
+@pkg catchfile
+`catchfile` · `readarray` · `datatool` · `csvsimple` · `pgfplotstable` · `filecontents` (arquivo de dados/macros) @@ \catchfile{x}{a.txt} ZQX
+@pkg -
+# Bibliografia e citações (BibTeX, natbib, biblatex)
+@cls article
+@pkg -
+## Ambiente thebibliography e BibTeX
+`thebibliography` + `\bibitem{chave} texto` + `\cite{chave}` @@ \cite{k} ZQX\begin{thebibliography}{9}\bibitem{k} Autor. Título. 2020.\end{thebibliography} @@ marca:cit
+`\bibitem[rótulo]{chave}` (rótulo manual) @@ \cite{k} ZQX\begin{thebibliography}{9}\bibitem[Au20]{k} Autor.\end{thebibliography} @@ marca:cit
+`\bibliographystyle{plain|unsrt|alpha|abbrv|ieeetr|apalike|abnt-alf|abntex2-num|abntex2-alf}` @@ \bibliographystyle{plain}ZQX
+`\bibliography{arquivo}` (`.bib`) @@ \cite{k}\bibliographystyle{plain}\bibliography{refs}ZQX @@ bib
+`\cite{a,b}` · `\cite[p.~10]{k}` (lista e página) @@ \cite[p.~10]{k}ZQX @@ marca:cit
+`\nocite{chave}` · `\nocite{*}` @@ \nocite{*}\bibliography{refs}ZQX @@ bib
+`\bibname` / `\refname` ("Referências") · `\renewcommand{\refname}{Referências}` @@ \renewcommand{\refname}{Referências}\bibliography{r}ZQX @@ bib
+`\bibliographystyle` `unsrtnat` `plainnat` `abbrvnat` `apalike` `ieeetr` `IEEEtran` `siam` `acm` (estilos) @@ \bibliographystyle{ieeetr}\cite{k}\bibliography{r}ZQX @@ bib
+Arquivo `.bib`: `@article` `@book` `@inproceedings` `@incollection` `@phdthesis` `@mastersthesis` `@techreport` `@misc` `@online` `@manual` `@unpublished` `@proceedings` `@booklet` `@conference` `@inbook` @@ \begin{filecontents*}{r.bib}@book{k,author={Silva, A.},title={Livro},year={2020}}\end{filecontents*}\cite{k}\bibliography{r}ZQX @@ fonte
+Arquivo `.bib`: campos `author` `title` `journal` `year` `volume` `number` `pages` `publisher` `address` `doi` `url` `urldate` `note` `edition` `editor` `booktitle` `school` `institution` `month` `isbn` `issn` `series` `chapter` `howpublished` `keywords` `abstract` `file` @@ \begin{filecontents*}{r.bib}@article{k,author={Silva, A. and Souza, B.},title={T},journal={J},year={2020},volume={1},pages={1--9},doi={10.1/x}}\end{filecontents*}\cite{k}\bibliography{r}ZQX @@ fonte
+`.bib`: `@string{}` · `@preamble{}` · `@comment{}` · `crossref` · `{\'a}` acentos · `{TeX}` proteção de caixa · `and others` · `author = {Last, First}` e `{First Last}` @@ \begin{filecontents*}{r.bib}@string{j="Jornal"}@article{k,author={Ana Silva},title={{TeX} em {P}ortugu{\^e}s},journal=j,year=2020}\end{filecontents*}\cite{k}\bibliography{r}ZQX @@ fonte
+`bibtex`/`biber` rodando para gerar `.bbl` · ler `.bbl` pronto (`\input{arquivo.bbl}`) @@ \begin{thebibliography}{9}\bibitem{k} ZQX\end{thebibliography} @@ txt:ZQX
+`\bibliography` com várias bases (`a,b`) · `\bibdata` · `\bibstyle` · `\citation` · `.aux` @@ \cite{k}\bibliography{a,b}ZQX @@ bib
+`chapterbib`/`bibunits`/`multibib`: uma bibliografia por capítulo · `\newcites{}{}` · `\citeA{}` @@ \usepackage{multibib}\newcites{ap}{Apêndice}ZQX
+`bibtopic`/`splitbib`/`bibtopicprefix` · `\begin{btSect}` · bibliografia por categoria @@ ZQX
+`\addcontentsline{toc}{section}{\refname}` · `tocbibind` (inclui bibliografia/índice no sumário) @@ \usepackage{tocbibind}ZQX
+@pkg natbib
+## natbib
+`natbib`: `\citet{}` (autor (ano)) · `\citep{}` ((autor, ano)) · `\citealt{}` · `\citealp{}` · `\citeauthor{}` · `\citeyear{}` · `\citeyearpar{}` @@ \citep{k}ZQX @@ marca:cit
+`natbib`: `\citet*{}` · `\citep*{}` (lista completa de autores) · `\Citet{}` `\Citep{}` (maiúscula) · `\citet[cap.~2]{}` · `\citep[ver][p.~3]{}` @@ \citep[ver][p.~3]{k}ZQX @@ marca:cit
+`natbib`: `\usepackage[round,colon,authoryear,sort&compress,super,numbers]{natbib}` @@ ZQX
+`natbib`: `\bibpunct{(}{)}{;}{a}{,}{,}` · `\setcitestyle{authoryear,open={((},close={))}}` @@ \setcitestyle{authoryear}ZQX
+`natbib`: `\bibsection` · `\bibhang` · `\bibsep` · `\newblock` · `\bibfont` · `\citenumfont` · `\cite*` @@ \setlength{\bibsep}{0pt}ZQX @@ ign
+`natbib`: estilos `plainnat` `abbrvnat` `unsrtnat` `apalike` `agsm` `dcu` `chicago` `named` `abntex2-alf` (autor-ano completo) @@ \bibliographystyle{plainnat}\citet{k}\bibliography{r}ZQX @@ marca:cit
+`apacite` / `apalike` / `harvard` / `chicago` · `\citeNP` · `\citeA` · `\shortcite` @@ \usepackage{apacite}\cite{k}ZQX @@ marca:cit
+@pkg biblatex
+## biblatex
+`\usepackage[backend=biber,style=…]{biblatex}` @@ ZQX
+`\addbibresource{arquivo.bib}` @@ \addbibresource{r.bib}ZQX @@ ign
+`\printbibliography` · `\printbibliography[title=,heading=,type=,keyword=,category=]` @@ \printbibliography ZQX @@ bib
+`\cite{}` · `\parencite{}` · `\textcite{}` · `\autocite{}` · `\footcite{}` · `\smartcite{}` · `\supercite{}` · `\citeauthor{}` · `\citetitle{}` · `\citeyear{}` · `\citeurl{}` · `\fullcite{}` · `\volcite{}` · `\cites{}{}` · `\parencites` · `\textcites` · `\autocites` @@ \parencite{k}ZQX @@ marca:cit
+`\Cite` `\Parencite` `\Textcite` `\Autocite` (maiúscula inicial) · `\parencite[p.~5]{}` · `\parencite[ver][p.~5]{}` · `\nocite{*}` @@ \Textcite[p.~5]{k}ZQX @@ marca:cit
+`biblatex`: `style=numeric` `numeric-comp` `authoryear` `authoryear-comp` `alphabetic` `verbose` `verbose-ibid` `trad-plain` `reading` `draft` @@ \usepackage[style=authoryear]{biblatex}\cite{k}ZQX @@ marca:cit
+`biblatex`: `style=abnt` (ABNT NBR 6023/10520, `biblatex-abnt`) @@ \usepackage[style=abnt]{biblatex}\cite{k}ZQX @@ estilocit:abnt
+`biblatex`: `style=ieee` (IEEE, `biblatex-ieee`) @@ \usepackage[style=ieee]{biblatex}\cite{k}ZQX @@ estilocit:ieee
+`biblatex`: `style=apa` (APA 7, `biblatex-apa`) @@ \usepackage[style=apa]{biblatex}\cite{k}ZQX @@ estilocit:apa
+`biblatex`: `style=chicago-authordate` · `chicago-notes` (`biblatex-chicago`) @@ \usepackage[style=chicago-authordate]{biblatex}\cite{k}ZQX @@ estilocit:chicago
+`biblatex`: `style=nature` · `science` · `phys` · `mla` · `vancouver` · `numeric-verb` · `gb7714-2015` · `oxyear` @@ \usepackage[style=vancouver]{biblatex}\cite{k}ZQX @@ estilocit:vancouver
+`biblatex`: `sorting=nty|ynt|none|nyt|anyt` · `maxnames=` · `minnames=` · `maxbibnames=` · `uniquename=` · `giveninits=true` · `dashed=false` · `doi=false` · `url=false` · `isbn=false` · `backref=true` · `citestyle=` · `bibstyle=` · `sortcites` · `autocite=footnote` @@ \usepackage[sorting=nyt,maxnames=3]{biblatex}ZQX
+`biblatex`: `\defbibheading{}{}` · `\DeclareFieldFormat` · `\renewbibmacro` · `\DefineBibliographyStrings{brazil}{}` · `\DeclareNameFormat` · `\AtEveryBibitem{}` · `\DeclareSortingTemplate` @@ \usepackage{biblatex}\defbibheading{bibliography}{\section*{Referências}}\printbibliography ZQX @@ bib
+`biblatex`: `\newrefsection` · `\begin{refsection}` · `\printbibliography[section=n]` · `\defbibfilter` · `\addtocategory` · `\DeclareBibliographyCategory` · `\bibbysection` @@ \usepackage{biblatex}\begin{refsection}ZQX\printbibliography\end{refsection} @@ bib
+`biblatex`: `\mkbibquote` · `\mkbibemph` · `\mkbibbold` · `\bibnamedelima` · `\addcomma` · `\addspace` · `\adddot` · `\newunit` · `\newblock` · `\finentry` · `\printfield{}` · `\printtext{}` · `\iffieldundef{}` · `\ifentrytype{}` @@ \usepackage{biblatex}\mkbibquote{ZQX} @@ txt:ZQX
+`biblatex`: `\printbibheading` · `\bibbysegment` · `\printbiblist` · `\printshorthands` · `\printbibliography[nottype=online]` @@ \usepackage{biblatex}\printbibheading ZQX @@ ign
+`biblatex`: campos de entrada `date` `urldate` `eprint` `eprinttype` `langid` `shorthand` `related` `entrysubtype` `pubstate` `origdate` `location` `organization` `usera`-`userf` · tipos `@online` `@thesis` `@report` `@software` `@dataset` `@patent` `@legislation` `@jurisdiction` `@video` `@audio` `@image` `@standard` @@ \begin{filecontents*}{r.bib}@online{k,author={A},title={T},url={http://x},urldate={2020-01-01},date={2020}}\end{filecontents*}\usepackage{biblatex}\cite{k}ZQX @@ fonte
+`biblatex`: `\autocite` nota de rodapé (ABNT/chicago-notes: `ibid.` `op. cit.`) · `\ibidtracker` · `\iffootnote` @@ \usepackage[style=abnt]{biblatex}\autocite{k}ZQX @@ marca:nota
+`biblatex-abnt`: `\citeonline{}` · `\citeauthoronline{}` · `\apud{}` · `\cite[p. 4]{}` · `[abnt-emphasize=bf]` · `[abnt-repeated-author-omit]` · `[abnt-url-accessdate]` · `[abnt-doi=true]` · `[abnt-etal-cite=3]` @@ \usepackage[style=abnt]{biblatex}\citeonline{k}ZQX @@ marca:cit
+`biblatex`: `biber` (backend; `.bcf` → `.bbl`) e `bibtex8`/`bibtex` (backends antigos) · `\usepackage[backend=bibtex]{biblatex}` @@ \usepackage[backend=bibtex]{biblatex}ZQX
+`biblatex`: `\usepackage{csquotes}` junto · `\DeclareQuoteStyle` · `\MakeOuterQuote{"}` @@ \usepackage{csquotes}\MakeOuterQuote{"}ZQX @@ ign
+`biblatex`: lista de abreviaturas `\printglossary` / `\nocite{*}` + `\printbibliography[heading=subbibliography]` @@ \nocite{*}\printbibliography ZQX @@ bib
+@pkg abntex2cite
+`abntex2cite`: `\citeonline` · `\cite` · `\citeauthoronline` · `\apud` · `\citeyear` · `\bibliographystyle{abntex2-alf}` · `\bibliographystyle{abntex2-num}` (estilos BibTeX ABNT) @@ \bibliographystyle{abntex2-alf}\citeonline{k}ZQX @@ marca:cit
+@pkg jurabib
+`jurabib`/`bibtopic`/`babelbib`/`bibleref`/`bibunits`/`multibib` (alternativas antigas) @@ ZQX
+@pkg csquotes
+## csquotes
+`csquotes`: `\enquote{}` · `\enquote*{}` · `\textquote{}` · `\foreignquote{}{}` · `\hyphenquote{}{}` · `\blockquote[fonte]{}` · `\foreignblockquote` · `\hyphenblockquote` · `\displayquote` @@ \enquote{ZQX} @@ txt:“
+`csquotes`: `\MakeOuterQuote{"}` · `\SetCiteCommand{\parencite}` · `\DeclareQuoteStyle` · `\ExecuteQuoteOptions{style=}` · `\setquotestyle` · `\csq@` @@ \MakeOuterQuote{"}"ZQX" @@ txt:“
+`csquotes`: `\begin{displayquote}[fonte]` · `quote`/`quotation` com fonte · citação longa ABNT (recuo 4 cm, corpo menor) @@ \begin{displayquote}ZQX\end{displayquote} @@ cit
+`csquotes`: `\mkbegdispquote` · `\mkccitation` · `\mkcitation` · `\textcquote` · `\blockcquote` (citação com `\cite`) @@ \blockquote{ZQX} @@ cit
+`quoting` · `epigraph` (`\epigraph{texto}{fonte}`) · `dedication` (`\dedication{}`) @@ \usepackage{epigraph}\epigraph{ZQX}{Autor} @@ txt:ZQX
+@pkg -
+# Pacotes — código, algoritmos, anotações e desenho
+@cls article
+@pkg -
+## listings
+@pkg listings
+`lstlisting` — `\begin{lstlisting}[language=Python]` @@ \begin{lstlisting}[language=Python]ZQX\end{lstlisting} @@ cod
+`\lstinline[language=C]{código}` · `\lstinline|…|` @@ \lstinline|ZQX| @@ tt
+`\lstinputlisting[language=,firstline=,lastline=]{arquivo}` @@ \lstinputlisting{a.py}ZQX
+`\lstset{basicstyle=\ttfamily\small,keywordstyle=\color{blue},commentstyle=,stringstyle=,numbers=left,numberstyle=,frame=single,breaklines=true,showstringspaces=false,tabsize=4,backgroundcolor=}` @@ \lstset{basicstyle=\ttfamily\small,numbers=left}\begin{lstlisting}ZQX\end{lstlisting} @@ cod
+`\lstdefinestyle{nome}{…}` + `style=nome` · `\lstdefinelanguage{}{}` (linguagem própria) · `morekeywords` · `sensitive` · `morecomment` · `morestring` @@ \lstdefinestyle{x}{basicstyle=\small}\begin{lstlisting}[style=x]ZQX\end{lstlisting} @@ cod
+`listings`: `caption=` `label=` (legenda "Listagem 1") · `captionpos=b` · `\lstlistoflistings` · `\lstlistingname` @@ \begin{lstlisting}[caption={Cap}]ZQX\end{lstlisting} @@ cod
+`listings`: `escapeinside={(*@}{@*)}` · `mathescape` · `literate={á}{{\'a}}1` (acentos) · `inputencoding=utf8` · `extendedchars` · `frame=lines` · `rulecolor=` · `xleftmargin=` · `framexleftmargin=` · `firstnumber=` · `stepnumber=` · `numbersep=` · `linewidth=` · `float` · `gobble=` · `columns=flexible` @@ \begin{lstlisting}[literate={á}{{\'a}}1]ZQX á\end{lstlisting} @@ cod
+`listings`: realce de linguagens (C, C++, Python, Java, SQL, Bash, Rust, JavaScript, Matlab, R, Haskell, HTML, XML, TeX, Fortran, Pascal, Lisp) @@ \begin{lstlisting}[language=C]int ZQX;\end{lstlisting} @@ cod
+@pkg minted
+## minted, fancyvrb
+`minted`: `\begin{minted}{python}` · `\begin{minted}[linenos,frame=lines,fontsize=\small,bgcolor=]{c}` @@ \begin{minted}{python}ZQX\end{minted} @@ cod
+`\mint{linguagem}|código|` · `\mintinline{linguagem}{código}` · `\inputminted{linguagem}{arquivo}` · `\newminted{}{}` · `\setminted{}` · `\usemintedstyle{}` @@ \mintinline{python}{ZQX} @@ tt
+`minted`: `-shell-escape` (Pygments) · `\usepackage[cache=false]{minted}` · estilos `monokai` `friendly` `default` `tango` `colorful` · `breaklines` · `autogobble` · `tabsize` · `escapeinside` · `mathescape` @@ \usepackage[cache=false]{minted}ZQX
+`tcblisting` · `\newtcblisting` · `tcolorbox` + `listings`/`minted` @@ \tcbuselibrary{listings}ZQX
+@pkg fancyvrb
+`fancyvrb`: `Verbatim` `BVerbatim` `LVerbatim` `SaveVerbatim` `\UseVerb` `\Verb` `\VerbatimInput` `\fvset{frame=single,numbers=left,fontsize=\small}` `\DefineVerbatimEnvironment` `\RecustomVerbatimCommand` `commandchars=` `\CustomVerbatimCommand` `codes={}` `gobble=` `label=` `tabsize=` @@ \begin{Verbatim}ZQX\end{Verbatim} @@ cod
+@pkg verbatim
+`verbatim` (pacote): `\verbatiminput{arquivo}` · `\begin{comment}…\end{comment}` @@ \verbatiminput{a.txt}ZQX
+@pkg -
+## algorithm2e, algorithmicx, algorithms
+@pkg algorithm2e
+`algorithm2e`: `\begin{algorithm}[H]` · `\caption{}` · `\KwIn{}` · `\KwOut{}` · `\KwResult{}` · `\SetKwInOut{}{}` · `\SetKwFunction` · `\SetKw{}{}` · `\SetAlgoLined` · `\DontPrintSemicolon` · `\LinesNumbered` @@ \begin{algorithm}[H]\caption{Alg}\KwIn{ZQX}\end{algorithm} @@ txt:ZQX
+`algorithm2e`: `\If{cond}{…}` · `\uIf` · `\ElseIf` · `\Else` · `\For{}{}` · `\ForEach{}{}` · `\While{}{}` · `\Repeat{}{}` · `\Return` · `\tcp{comentário}` · `\tcc{}` · `\;` · `\nl` · `\eIf{}{}{}` · `\Switch` · `\Case` · `\Fn` · `\Proc` · `\lIf` · `\lFor` · `\emph{}` @@ \begin{algorithm}\If{c}{ZQX\;}\end{algorithm} @@ txt:ZQX
+@pkg algorithm
+`algorithm` (float) + `algpseudocode`/`algorithmic`: `\begin{algorithm}\caption{}\begin{algorithmic}[1]` @@ \usepackage{algpseudocode}\begin{algorithm}\caption{A}\begin{algorithmic}[1]\State ZQX\end{algorithmic}\end{algorithm} @@ txt:ZQX
+@pkg algpseudocode
+`algpseudocode`: `\State` · `\If{}`…`\ElsIf{}`…`\Else`…`\EndIf` · `\For{}`…`\EndFor` · `\ForAll{}` · `\While{}`…`\EndWhile` · `\Repeat`…`\Until{}` · `\Function{Nome}{args}`…`\EndFunction` · `\Procedure`…`\EndProcedure` · `\Return` · `\Require` · `\Ensure` · `\Comment{}` · `\Call{}{}` · `\algnewcommand` · `\algrenewcommand` · `\algorithmicrequire` @@ \begin{algorithmic}\Require ZQX\State a\end{algorithmic} @@ txt:ZQX
+@pkg algorithmic
+`algorithmic`/`algorithmicx` antigo: `\STATE` `\IF{}` `\ENDIF` `\FOR` `\ENDFOR` `\WHILE` `\ENDWHILE` `\REQUIRE` `\ENSURE` `\RETURN` `\COMMENT` @@ \begin{algorithmic}\STATE ZQX\end{algorithmic} @@ txt:ZQX
+@pkg algorithmicx
+`algorithmicx`: `\begin{algorithmic}[1]` numeração · `\algsetup{linenodelimiter=.}` · `\algdef{SE}` · `\algloopdefx` · `\algorithmiccomment` · `\algtext*` @@ \begin{algorithmic}[1]\State ZQX\end{algorithmic} @@ txt:ZQX
+@pkg algorithmicx,algpseudocode
+`algorithmicx`: `\floatname{algorithm}{Algoritmo}` · `\renewcommand{\listalgorithmcfname}` · `\listofalgorithms` · `\algorithmicrequire` renomear (pt-BR) @@ \renewcommand{\algorithmicrequire}{\textbf{Entrada:}}\begin{algorithmic}\Require ZQX\end{algorithmic} @@ txt:Entrada
+@pkg -
+## todonotes, comentários e revisão
+@pkg todonotes
+`todonotes`: `\todo{}` (nota na margem) · `\todo[inline]{}` · `\todo[color=,author=,size=,caption=,noline,fancyline,prepend]{}` · `\missingfigure{}` · `\listoftodos` · `\todototoc` · `\setuptodonotes{}` · `[disable]` `[colorinlistoftodos]` @@ \todo{ZQX} @@ txt:ZQX
+@pkg changes
+`changes`/`trackchanges`/`xcolor`: `\added{}` `\deleted{}` `\replaced{}{}` `\highlight{}` `\comment{}` · `\listofchanges` · `\definechangesauthor` @@ \added{ZQX} @@ txt:ZQX
+@pkg comment
+`comment`: `\begin{comment}…\end{comment}` · `\excludecomment{nome}` · `\includecomment` · `\specialcomment` · `\comment` @@ \begin{comment}oculto\end{comment}ZQX @@ sem:oculto
+@pkg fixme
+`fixme`/`easy-todo`/`pdfcomment` (`\pdfcomment{}` · `\pdfmargincomment{}`) · `marginnote` · `soul` para realçar · `\hl{}` @@ \fixme{ZQX} @@ txt:ZQX
+@pkg ulem
+## ulem, soul, outros
+`ulem`: `\uline` `\uuline` `\uwave` `\sout` `\xout` `\dashuline` `\dotuline` `\normalem` `\ULdepth` `\ULthickness` `\markoverwith` `\useunder` @@ \uline{ZQX} @@ u
+@pkg soul
+`soul`: `\so{}` (espaçamento) · `\caps{}` · `\ul{}` · `\st{}` · `\hl{}` · `\sethlcolor` · `\setul{}{}` · `\setulcolor` · `\setstcolor` · `\soulaccent` · `\soulregister` @@ \hl{ZQX} @@ realce
+@pkg textcomp
+`textcomp`: `\texteuro` `\textcelsius` `\textdegree` `\textcopyright` `\textregistered` `\texttrademark` `\textperthousand` `\textbullet` `\textmu` `\textohm` `\textonesuperior` `\texttwosuperior` `\textthreesuperior` `\textnormal{}` @@ ZQX \texteuro @@ txt:€
+@pkg eurosym
+`eurosym`: `\euro` · `\EUR{}` · `\EURdig` · `\EURhv` · `\EURcr` · `\EURtm` @@ ZQX \euro @@ txt:€
+@pkg gensymb
+`gensymb`: `\degree` `\celsius` `\perthousand` `\micro` `\ohm` @@ ZQX \degree \celsius @@ txt:°
+@pkg url
+`url`: `\url{}` · `\urldef` · `\path{}` · `\UrlFont` · `\UrlBreaks` · `\UrlBigBreaks` · `\UrlOrds` · `\urlstyle{same|tt|rm|sf}` @@ \url{http://x.org/ZQX} @@ link
+@pkg pdfpages
+`pdfpages`: `\includepdf[pages={1,3-5},nup=2x2,landscape,angle=90,scale=0.9,frame,offset=,pagecommand={\thispagestyle{plain}},noautoscale,fitpaper,delta=,width=,addtotoc={}]{arquivo.pdf}` · `\includepdfmerge` @@ \includepdf[pages=-]{a.pdf}ZQX
+@pkg lscape
+`lscape`/`pdflscape`/`rotating`: página em paisagem para tabela larga @@ \begin{landscape}ZQX\end{landscape} @@ txt:ZQX
+@pkg -
+## TikZ e PGF
+@pkg tikz
+`tikzpicture`: `\begin{tikzpicture}…\draw (0,0) -- (1,1);\end{tikzpicture}` @@ \begin{tikzpicture}\draw (0,0) -- (1,1);\end{tikzpicture}ZQX
+`tikz`: `\node[draw,circle] (a) at (0,0) {texto};` · `\path` · `\fill` · `\filldraw` · `\clip` · `\shade` · `\coordinate` · `\foreach` · `\pic` · `\matrix` · `\graph` · estilos (`\tikzset`) · `\tikzstyle` · cores · setas (`->`, `stealth`) · `bend left` · `rounded corners` · `dashed` · `thick` · `scale` · `rotate` · `shift` @@ \begin{tikzpicture}\node[draw] at (0,0) {A};\end{tikzpicture}ZQX
+`tikz`: bibliotecas (`\usetikzlibrary{arrows.meta,positioning,calc,shapes,decorations.pathmorphing,patterns,fit,backgrounds,matrix,trees,mindmap,automata,intersections,through,shadows,spy,3d,angles,quotes,chains,petri,er,datavisualization,fadings,external}`) @@ \usetikzlibrary{arrows.meta,positioning}ZQX
+`tikz`: `\tikz[baseline]{…}` (inline) · `\tikz \draw (0,0) circle (1ex);` · `remember picture,overlay` (sobre a página) · `\tikzmark` @@ \tikz \draw (0,0) circle (1ex);ZQX
+`tikz-cd` (`tikzcd`): diagramas comutativos `\begin{tikzcd}A \arrow[r] & B\end{tikzcd}` @@ \usepackage{tikz-cd}\begin{tikzcd}A \arrow[r] & B\end{tikzcd}ZQX
+`forest` · `tikz-qtree` · `smartdiagram` · `pgf-umlcd` · `tikz-uml` · `bytefield` · `tikz-timing` · `karnaugh-map` · `tkz-euclide` · `tkz-tab` · `tkz-graph` · `pst-*` (PSTricks) @@ \usepackage{forest}\begin{forest}[ZQX]\end{forest}
+@pkg pgfplots
+`pgfplots`: `\begin{axis}[xlabel=,ylabel=,title=,legend pos=,grid=major,xmin=,xmax=,width=,height=]` + `\addplot{x^2};` · `\addplot table {dados.dat};` · `\addplot3` · `\addlegendentry{}` · `ybar` · `\pgfplotstableread` · `\pgfplotsset{compat=1.18}` · `log` · `error bars` · `contour` · `surf` @@ \begin{tikzpicture}\begin{axis}\addplot{x^2};\end{axis}\end{tikzpicture}ZQX
+@pkg circuitikz
+`circuitikz`: `\begin{circuitikz}\draw (0,0) to[R=$R_1$] (2,0) to[C] (4,0);\end{circuitikz}` · `battery` · `ioff` · `short` · `american`/`european` · portas lógicas · amplificadores · `\ctikzset` · transistores · transformadores @@ \begin{circuitikz}\draw (0,0) to[R] (2,0);\end{circuitikz}ZQX
+@pkg chemfig
+`chemfig`: `\chemfig{A-B}` · `\chemfig{*6(-=-=-=)}` · `\setchemfig{}` · `\schemestart`/`\schemestop` · `\arrow` · `\chemname` · `\charge` · `\chemmove` · `\lewis` · `\Charge` · `\definesubmol` @@ \chemfig{A-B}ZQX
+@pkg pst-all
+`pstricks`/`pst-plot`/`pst-node` · `\psframe` · `\psline` · `\pscircle` · `\rput` · `\psaxes` @@ \usepackage{pstricks}\psframe(0,0)(1,1)ZQX
+@pkg asymptote
+`asymptote` · `\begin{asy}` · `gnuplottex` · `pythontex` · `sagetex` · `knitr`/`Sweave` · `luacode` · `luaplot` · `metapost` (`\begin{mplibcode}`) @@ \begin{asy}draw((0,0)--(1,1));\end{asy}ZQX
+@pkg -
+`tikzpicture` dentro de `figure`, de `\fbox`, de `minipage`, de célula · `\input{figura.tikz}` · `externalize` (cache PDF) · `standalone` compilado à parte @@ \begin{figure}\begin{tikzpicture}\draw (0,0)--(1,0);\end{tikzpicture}\caption{ZQX}\end{figure} @@ txt:ZQX
+Imagem vetorial a partir do desenho TikZ (compilador TeX próprio ou externo) @@ = @@ =
+# Classes de documento e modelos (abntex2, beamer, currículos, KOMA)
+@pkg -
+## abntex2
+@cls {abntex2}
+`abntex2` — `\imprimircapa` · `\imprimirfolhaderosto` · `\imprimirfichacatalografica` · `\imprimirerrata` · `\imprimirfolhadeaprovacao` · `\imprimirdedicatoria` · `\imprimiragradecimentos` · `\imprimirepigrafe` · `\imprimirresumo` · `\imprimirlistadefiguras` · `\imprimirsumario` @@ \titulo{T}\autor{A}\data{2020}\begin{document}\imprimircapa ZQX @@ txt:ZQX
+`abntex2` — `\titulo{}` · `\autor{}` · `\data{}` · `\local{}` · `\instituicao{}` · `\orientador{}` · `\coorientador{}` · `\tipotrabalho{}` · `\preambulo{}` @@ \titulo{ZQX}\autor{A}\begin{document}\imprimircapa @@ txt:ZQX
+`abntex2` — `\begin{resumo}` · `\begin{resumo}[Abstract]` · `\begin{otherlanguage*}{english}` · `\palavraschave` · `\textbf{Palavras-chave}:` @@ \begin{resumo}ZQX\end{resumo} @@ txt:ZQX
+`abntex2` — `\frontmatter` · `\mainmatter` · `\backmatter` · `\textual` · `\pretextual` · `\postextual` · `\apendices` · `\anexos` · `\begin{apendicesenv}` · `\partanexos` @@ \frontmatter\chapter*{ZQX} @@ h:1
+`abntex2` — `\begin{citacao}` (citação longa com recuo de 4 cm) · `\begin{citacao}[docs]` @@ \begin{citacao}ZQX\end{citacao} @@ cit
+`abntex2` — `\chapter*{}` + `\pdfbookmark` · `\cleardoublepage` · `\phantompart` · `\tableofcontents*` · `\printindex` · `\printbibliography` · `\bibliography{}` + `\bibliographystyle{abntex2-alf}` @@ \tableofcontents* @@ sum
+`abntex2` — `\ABNTEXchapterfont` · `\ABNTEXsectionfont` · `\ABNTEXsubsectionfont` · `\ABNTEXsubsubsectionfont` · `\ABNTEXchapterfontsize` · `\setlrmarginsandblock{3cm}{2cm}{*}` · `\setulmarginsandblock{3cm}{2cm}{*}` · `\checkandfixthelayout` @@ \setlrmarginsandblock{3cm}{2cm}{*}\begin{document}ZQX @@ margem
+`abntex2` — `\SingleSpacing` · `\OnehalfSpacing` · `\DoubleSpacing` · `\setlength{\parindent}{1.3cm}` · `\setlength{\parskip}{0.2cm}` · `\setlength{\ABNTEXsignthickness}{0.4pt}` @@ \begin{document}\OnehalfSpacing A⏎⏎ZQX @@ entrelinha
+`abntex2` — `\begin{agradecimentos}` · `\begin{dedicatoria}` · `\begin{epigrafe}` · `\begin{errata}` · `\begin{folhadeaprovacao}` · `\assinatura{}` · `\membrabanca{}` · `\listaabreviaturas` · `\begin{siglas}`/`\begin{simbolos}` @@ \begin{agradecimentos}ZQX\end{agradecimentos} @@ txt:ZQX
+`abntex2` — `\citeonline{}` · `\apud{}{}` · notas explicativas `\footnote` · legenda "Fonte:" · `\fonte{}` · figuras ABNT (`\caption` acima, `\legend{Fonte: …}`) @@ \begin{figure}\caption{A}\includegraphics{a.png}\legend{Fonte: ZQX}\end{figure} @@ txt:ZQX
+`abntex2` — numeração: capítulo `1 TÍTULO` em caixa alta e negrito, seção `1.1 TÍTULO` · página no canto superior direito · `\pagestyle{abntheadings}` · `\pagestyle{simple}` @@ \pagestyle{abntheadings}\begin{document}ZQX
+`abntex2` — `\newpage` + `\thispagestyle{empty}` capas · `\setlength{\ABNTEXsignwidth}{8cm}` · modelos `abntex2-modelo-trabalho-academico.tex` / `abntex2-modelo-artigo.tex` · `[article]` · `[chapter=TITLE,section=TITLE]` @@ \begin{document}\chapter{ZQX} @@ h:1
+`abntex2` — `\texto` / `\tableofcontents` com "Sumário", `\listoffigures` "Lista de ilustrações" · `\renewcommand{\listfigurename}{Lista de ilustrações}` @@ \begin{document}\listoffigures @@ lof
+@cls beamer
+## beamer (slides) — vão para o FeatherSlide
+`beamer`: `\begin{frame}{Título}…\end{frame}` · `\frametitle{}` · `\framesubtitle{}` @@ \begin{frame}{T}ZQX\end{frame} @@ txt:ZQX
+`beamer`: `\titlepage` · `\title` · `\subtitle` · `\author` · `\institute` · `\date` · `\titlegraphic` · `\logo` · `\frame{\titlepage}` @@ \title{T}\begin{document}\begin{frame}\titlepage\end{frame}ZQX @@ txt:ZQX
+`beamer`: `\usetheme{Madrid|Berlin|Warsaw|CambridgeUS|Singapore|Boadilla|metropolis|default|Frankfurt|Copenhagen|Antibes|Montpellier|Goettingen|Hannover|AnnArbor|Rochester|PaloAlto|Marburg|Ilmenau|JuanLesPins|Malmoe|Luebeck|Szeged|Darmstadt|Dresden|Bergen|Boadilla}` @@ \usetheme{Madrid}\begin{document}ZQX
+`beamer`: `\usecolortheme{}` · `\usefonttheme{}` · `\useinnertheme{}` · `\useoutertheme{}` · `\setbeamercolor{}{fg=,bg=}` · `\setbeamerfont{}{}` · `\setbeamertemplate{navigation symbols}{}` · `\setbeamertemplate{footline}` · `\setbeamersize{text margin left=}` @@ \usecolortheme{beaver}\begin{document}ZQX
+`beamer`: `\pause` · `\onslide<2->{}` · `\only<1>{}` · `\uncover<2->{}` · `\visible<3->{}` · `\invisible` · `\alt<1>{a}{b}` · `\temporal` · `<+->` em listas · `\item<2->` · `\action` · `\transduration` · `\transboxout` @@ \begin{frame}A\pause ZQX\end{frame} @@ txt:ZQX
+`beamer`: `[allowframebreaks]` · `[fragile]` · `[plain]` · `[t]` · `[c]` · `[shrink]` · `[noframenumbering]` · `[label=]` · `[containsverbatim]` · `[b]` @@ \begin{frame}[fragile]{T}\begin{verbatim}ZQX\end{verbatim}\end{frame} @@ cod
+`beamer`: `block` · `alertblock` · `exampleblock` · `theorem` · `definition` · `lemma` · `proof` · `corollary` · `example` · `\alert{}` · `\structure{}` · `\emph` @@ \begin{frame}\begin{block}{T}ZQX\end{block}\end{frame} @@ txt:ZQX
+`beamer`: `\begin{columns}\column{.5\textwidth}…\end{columns}` · `columns [T]` · `\column` @@ \begin{frame}\begin{columns}\column{.5\textwidth}ZQX\column{.5\textwidth}B\end{columns}\end{frame} @@ txt:ZQX
+`beamer`: `\section` · `\subsection` · `\tableofcontents[currentsection]` · `\AtBeginSection[]{}` · `\AtBeginSubsection` · `\appendix` · `\insertframenumber` · `\inserttotalframenumber` · `\insertshortauthor` · `\insertsection` · `\inserttitle` @@ \section{S}\begin{frame}\tableofcontents\end{frame}ZQX @@ txt:ZQX
+`beamer`: `\hyperlink` · `\hypertarget` · `\hyperlinkframestartnext` · `\againframe` · `\framezoom` · `\begin{overprint}` · `\includegraphics` · `\movie` · `\animate` (animação) · `\note{}` · `\setbeameroption{show notes}` · `handout` · `[notes=only]` · `\mode<presentation>` · `\mode<handout>` @@ \begin{frame}\note{n}ZQX\end{frame} @@ txt:ZQX
+`beamer`: `\documentclass[aspectratio=169,10pt,xcolor=dvipsnames,handout,t]{beamer}` · `[unicode]` · `[hyperref={pdfpagelabels=false}]` · `[compress]` · `[mathserif]` @@ \documentclass[aspectratio=169]{beamer}\begin{document}\begin{frame}ZQX\end{frame} @@ txt:ZQX
+@cls {moderncv}
+## moderncv, altacv, awesome-cv, res
+`moderncv`: `\moderncvstyle{classic|casual|banking|oldstyle|fancy}` · `\moderncvcolor{blue|orange|green|red|purple|grey|black}` · `\name{}{}` · `\title{}` · `\address{}{}{}` · `\phone[mobile]{}` · `\email{}` · `\homepage{}` · `\social[linkedin]{}` · `\photo[64pt][0.4pt]{}` · `\extrainfo{}` · `\quote{}` @@ \moderncvstyle{classic}\name{A}{B}\begin{document}\makecvtitle ZQX @@ txt:ZQX
+`moderncv`: `\section{}` · `\cventry{anos}{cargo}{empresa}{cidade}{nota}{descrição}` · `\cvitem{rótulo}{texto}` · `\cvdoubleitem{}{}{}{}` · `\cvlistitem{}` · `\cvlistdoubleitem{}{}` · `\cvitemwithcomment{}{}{}` · `\cvcolumn` · `\makecvtitle` · `\makeletterhead` · `\recipient{}{}` · `\opening{}` · `\closing{}` · `\enclosure[]{}` @@ \begin{document}\section{Experiência}\cventry{2020}{Cargo}{Empresa}{Cidade}{}{ZQX} @@ txt:ZQX
+@cls {altacv}
+`altacv`: `\cvsection{}` · `\cvevent{cargo}{empresa}{datas}{local}` · `\cvtag{}` · `\cvskill{nome}{nível}` · `\cvachievement{}{}{}` · `\cvref{}{}{}` · `\divider` · `\begin{paracol}{2}` · `\name{}` · `\tagline{}` · `\photoR{}{}` · `\personalinfo{\email{}\phone{}\mailaddress{}\location{}\homepage{}\linkedin{}\github{}}` · `\makecvheader` · `\columnratio{}` @@ \begin{document}\cvsection{Exp}\cvevent{Cargo}{Empresa}{2020}{ZQX} @@ txt:ZQX
+`awesome-cv`/`res`/`europecv`/`friggeri-cv`/`deedy-resume`/`twentysecondcv` (currículos) · `\cvsection` · `\cvskills` · `\cventries` · `\cvhonors` @@ ZQX
+@cls {standalone}
+## standalone, import, subfiles
+`standalone`: `\documentclass[tikz,border=5pt]{standalone}` (recorte do conteúdo) · `\standaloneconfig{}` · `\begin{standalone}` · `\includestandalone[]{}` · `class=` @@ \begin{document}ZQX @@ txt:ZQX
+@cls article
+@pkg import
+`import`: `\import{caminho/}{arquivo}` · `\subimport{}{}` · `\inputfrom{}{}` · `\includefrom{}{}` · `\subincludefrom` · `\subimportfrom` @@ \import{cap/}{um}ZQX @@ sem:import
+@pkg subfiles
+`subfiles`: `\documentclass[principal.tex]{subfiles}` · `\subfile{capitulo}` · `\subfileinclude` · `\subfix{}` · `\subfiles@` (capítulo compilado separado) @@ \subfile{cap1}ZQX @@ sem:subfile
+@pkg -
+`\input{capitulos/introducao}` (arquivo ao lado, sem `.tex`) · `\include{}` · `\InputIfFileExists{}{}{}` · `\IfFileExists{}{}{}` · caminho relativo e `\graphicspath` @@ \input{capitulos/introducao}ZQX @@ sem:input
+`\includeonly{cap1,cap3}` · `\clearpage` implícito do `\include` · `\input` aninhado · `\endinput` @@ \includeonly{a}\include{a}ZQX @@ sem:include
+@cls {scrartcl}
+## KOMA-Script (scrartcl, scrreprt, scrbook, scrlttr2)
+`KOMA-Script`: `\KOMAoptions{fontsize=12pt,paper=a4,parskip=half,DIV=12,BCOR=5mm,headings=small,numbers=noenddot,toc=bibliography}` · `\addtokomafont{section}{\sffamily}` · `\setkomafont{disposition}{}` · `\recalctypearea` · `\typearea` · `\areaset` @@ \KOMAoptions{fontsize=12pt}\begin{document}ZQX @@ tam
+`KOMA-Script`: `\subject{}` · `\publishers{}` · `\titlehead{}` · `\uppertitleback{}` · `\lowertitleback{}` · `\dedication{}` · `\extratitle{}` · `\minisec{}` · `\setcapindent{}` · `\captionabove` · `\captionbelow` · `\listofnotes` · `\thefootnote` · `\scrheadings` · `\manualmark` · `\automark` · `\ohead` · `\ifoot` · `\pagemark` @@ \subject{ZQX}\begin{document}\maketitle @@ txt:ZQX
+`scrlttr2`: `\begin{letter}{Destinatário}` · `\opening{}` · `\closing{}` · `\setkomavar{fromname}{}` · `\KOMAoptions{fromalign=center}` · `\ps` · `\cc` · `\encl` · `\signature{}` · `\yourref` · `\yourmail` · `\myref` · `\customer` · `\invoice` · `\place` · `\date` @@ \begin{document}\begin{letter}{Para}\opening{Prezado}ZQX\closing{Att}\end{letter} @@ txt:ZQX
+@cls {memoir}
+## memoir
+`memoir`: `\chapterstyle{}` · `\pagestyle{}` · `\makepagestyle{}` · `\makeevenhead` · `\setsecheadstyle{}` · `\setlength{\beforechapskip}` · `\newsubfloat` · `\setsubparaindent` · `\midsloppy` · `\abstractintoc` · `\settocdepth` · `\setsecnumdepth` · `\maxsecnumdepth` · `\openepigraph` · `\epigraph` · `\poemtitle` · `\begin{verse}` · `\Verbatim` · `\tightlists` · `\newlistentry` · `\cftchapterfont` @@ \chapterstyle{default}\begin{document}\chapter{ZQX} @@ h:1
+@cls article
+@pkg -
+## Pacotes de layout diversos
+@pkg titling
+`titling`: `\pretitle{}` · `\posttitle{}` · `\preauthor{}` · `\postauthor{}` · `\predate{}` · `\postdate{}` · `\thetitle` · `\theauthor` · `\thedate` · `\droptitle` @@ \pretitle{\begin{center}\LARGE}\posttitle{\end{center}}\title{T}\begin{document}\maketitle ZQX @@ txt:ZQX
+@pkg changepage
+`changepage`/`chngpage`: `\begin{adjustwidth}{2cm}{2cm}` · `\strictpagecheck` · `\checkoddpage` @@ \begin{adjustwidth}{2cm}{2cm}ZQX\end{adjustwidth} @@ recuo
+@pkg lineno
+`lineno`: `\linenumbers` · `\nolinenumbers` · `\pagewiselinenumbers` · `\begin{linenumbers}` · `\modulolinenumbers[5]` · `\setcounter{linenumber}` @@ \linenumbers ZQX @@ numlinhas
+@pkg lettrine
+`lettrine`: `\lettrine[lines=3]{A}{o começo}` (capitular) · `\lhang` · `\loversize` · `\lraise` @@ \lettrine{A}{ZQX começo} @@ txt:ZQX
+@pkg hanging
+`hanging`/`hangparas`: `\hangpara{}{}` · `\begin{hangparas}{1cm}{1}` (recuo suspenso) · `\hangindent` · `\hangafter` @@ \begin{hangparas}{1cm}{1}ZQX\end{hangparas} @@ recuo
+@pkg tabto
+`tabto`: `\tabto{2cm}` · `\NumTabs{}` · `\tab` · `\tabto*` @@ A\tabto{2cm}ZQX @@ sem:tabto
+@pkg setspace
+`setspace`: `\setstretch` · `\onehalfspacing` · `\doublespacing` · `\singlespacing` · `\begin{spacing}{1.5}` · `\SetSinglespace` · `\setdisplayskipstretch` @@ \onehalfspacing A⏎⏎ZQX @@ entrelinha
+@pkg datetime
+`datetime`/`datetime2`/`isodate`/`scrdate`: `\today` · `\formatdate{}{}{}` · `\DTMtoday` · `\newdateformat` · `\ddmmyyyydate` · `\currenttime` @@ \today ZQX @@ sem:today
+@pkg qrcode
+`qrcode`: `\qrcode[height=2cm]{texto}` · `\barcode` · `\usepackage{pst-barcode}` @@ \qrcode{ZQX}
+@pkg pgf-pie
+`pgf-pie`: `\pie{50/A,50/B}` (pizza) · `smartdiagram` · `tikz-3dplot` · `pgfgantt` (`\begin{ganttchart}`) · `bytefield` · `tikz-timing` · `pgf-spectra` @@ \begin{tikzpicture}\pie{50/A,50/B}\end{tikzpicture}ZQX
+@pkg multicol
+`multicol`: `\begin{multicols}{3}[\section{T}]` · `\columnbreak` · `\vfill\null` · `\setlength{\columnseprule}{0.4pt}` · `\raggedcolumns` · `multicols*` @@ \begin{multicols}{3}ZQX\end{multicols} @@ txt:ZQX
+@pkg verse
+`verse`: `\poemtitle{}` · `\settowidth{\versewidth}{}` · `\begin{verse}[\versewidth]` · `\attrib{}` · `\flagverse{}` · `\poemlines{5}` · `\vin` (versos numerados) @@ \begin{verse}ZQX\\ B\end{verse} @@ txt:ZQX
+@pkg musixtex
+`musixtex` / `lilypond` / `abc` (partituras) · `\begin{music}` · `\notes` @@ \begin{music}\notes\qa{c}\en\end{music}ZQX
+@pkg bytefield
+`bytefield`, `rail` (diagramas de sintaxe), `syntax`, `bnf` · `\begin{syntaxdiagram}` · `\begin{grammar}` @@ \begin{grammar}<a> ::= ZQX\end{grammar} @@ txt:ZQX
+@pkg -
+`inputenc`/`textcomp` com `\usepackage[utf8x]{inputenc}` + `ucs` (legado) · `\DeclareUnicodeCharacter{00A0}{~}` @@ \DeclareUnicodeCharacter{00A0}{~}ZQX @@ ign
+>@fim ## Fidelidade (medidas, não amplitude)
+>@fim Itens que o leitor não mede (marca fixa no arquivo de dados); cada um precisa de comparação visual com o PDF do `pdflatex`.
+>@fim - [ ] Mesmas quebras de linha e de página do `pdflatex` (Knuth–Plass, viúvas e órfãs)
+>@fim - [ ] Hifenização TeX em pt-BR (padrões do `hyph-pt`)
+>@fim - [ ] Métricas de fonte iguais às do LaTeX (Computer/Latin Modern, Helvetica)
+>@fim - [ ] Espaçamento vertical exato (`\parskip`, `\baselineskip`, `\topsep`, `\abovedisplayskip`)
+>@fim - [ ] Posição dos flutuantes (`[htbp]`, `\floatpagefraction`) igual à do LaTeX
+>@fim - [ ] Numeração de páginas e de seções idêntica no sumário (duas passagens)
+>@fim - [ ] Kerning, ligaduras (`fi`, `fl`) e espaçamento após ponto final
+>@fim - [ ] Largura de colunas de tabela (`p{}`, `X`, `tabularx` iterativo) igual à do TeX
+>@fim
+>@fim ## Fora do alcance do leitor próprio (precisa de um TeX de verdade)
+>@fim TikZ/PGF e `pgfplots` (desenho), `\foreach`/loops, pacotes que programam o TeX (LaTeX3 interno, `expl3`), `chemfig`,
+>@fim `circuitikz`, `musixtex`, `Lua` (`\directlua`). Caminho previsto: compilar só esse trecho com um motor TeX e inserir
+>@fim o resultado como imagem vetorial; ou um motor TeX próprio em Rust (projeto grande, ainda não decidido). Os itens
+>@fim correspondentes aparecem nas seções acima como `[ ]` e continuam contando contra a paridade de propósito.

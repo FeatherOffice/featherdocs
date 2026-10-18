@@ -1,0 +1,39 @@
+# arquivo	tipo	licenca	origem
+# Arquivos MIT: Copyright (c) os autores dos repositórios citados; licença MIT (texto em https://opensource.org/license/mit). Cada arquivo LPPL/GPL/Apache traz o aviso de licença no próprio cabeçalho.
+mt-report-template.tex	relatorio	MIT (MartinThoma/LaTeX-examples)	https://raw.githubusercontent.com/MartinThoma/LaTeX-examples/master/documents/report-template/report-template.tex
+mt-seminar-paper.tex	artigo	MIT (MartinThoma/LaTeX-examples)	https://raw.githubusercontent.com/MartinThoma/LaTeX-examples/master/documents/seminar-paper/main.tex
+mt-table-minimal.tex	exemplo	MIT (MartinThoma/LaTeX-examples)	https://raw.githubusercontent.com/MartinThoma/LaTeX-examples/master/documents/table-minimal/table-minimal.tex
+mt-table-multiple-pages.tex	exemplo	MIT (MartinThoma/LaTeX-examples)	https://raw.githubusercontent.com/MartinThoma/LaTeX-examples/master/documents/table-multiple-pages/table-multiple-pages.tex
+mt-footnotes.tex	exemplo	MIT (MartinThoma/LaTeX-examples)	https://raw.githubusercontent.com/MartinThoma/LaTeX-examples/master/documents/footnotes/footnotes.tex
+mt-si-units.tex	exemplo	MIT (MartinThoma/LaTeX-examples)	https://raw.githubusercontent.com/MartinThoma/LaTeX-examples/master/documents/si-units/si-units.tex
+mt-text-styling.tex	exemplo	MIT (MartinThoma/LaTeX-examples)	https://raw.githubusercontent.com/MartinThoma/LaTeX-examples/master/documents/some-text-styling/some-text-styling.tex
+mt-cv.tex	curriculo	MIT (MartinThoma/LaTeX-examples)	https://raw.githubusercontent.com/MartinThoma/LaTeX-examples/master/documents/cv-curriculum-vitae/cv-curriculum-vitae.tex
+mt-letter.tex	carta	MIT (MartinThoma/LaTeX-examples)	https://raw.githubusercontent.com/MartinThoma/LaTeX-examples/master/documents/letter/letter.tex
+mt-list-item-sep.tex	exemplo	MIT (MartinThoma/LaTeX-examples)	https://raw.githubusercontent.com/MartinThoma/LaTeX-examples/master/documents/list-item-sep/list-item-sep.tex
+mt-custom-environment.tex	exemplo	MIT (MartinThoma/LaTeX-examples)	https://raw.githubusercontent.com/MartinThoma/LaTeX-examples/master/documents/custom-environment/custom-environment.tex
+mt-uebungsblatt.tex	lista-de-exercicios	MIT (MartinThoma/LaTeX-examples)	https://raw.githubusercontent.com/MartinThoma/LaTeX-examples/master/documents/sicherheit-uebungsblatt/sicherheit-uebungsblatt.tex
+mt-math-theorem.tex	exemplo	MIT (MartinThoma/LaTeX-examples)	https://raw.githubusercontent.com/MartinThoma/LaTeX-examples/master/documents/math-theorem/math-theorem.tex
+mt-source-code-listings.tex	exemplo	MIT (MartinThoma/LaTeX-examples)	https://raw.githubusercontent.com/MartinThoma/LaTeX-examples/master/documents/source-code-listings/source-code-listings.tex
+mt-protokoll.tex	relatorio	MIT (MartinThoma/LaTeX-examples)	https://raw.githubusercontent.com/MartinThoma/LaTeX-examples/master/documents/protokoll/protokoll.tex
+mt-cooking-recipe.tex	exemplo	MIT (MartinThoma/LaTeX-examples)	https://raw.githubusercontent.com/MartinThoma/LaTeX-examples/master/documents/cooking-recipe/cooking-recipe.tex
+mt-handout.tex	artigo	MIT (MartinThoma/LaTeX-examples)	https://raw.githubusercontent.com/MartinThoma/LaTeX-examples/master/documents/handout-art-in-ml/handout-art-in-ml.tex
+mt-colors.tex	exemplo	MIT (MartinThoma/LaTeX-examples)	https://raw.githubusercontent.com/MartinThoma/LaTeX-examples/master/documents/colors/colors.tex
+mt-paper-peer-review.tex	artigo	MIT (MartinThoma/LaTeX-examples)	https://raw.githubusercontent.com/MartinThoma/LaTeX-examples/master/documents/paper-peer-review/paper-peer-review.tex
+mt-checkliste.tex	exemplo	MIT (MartinThoma/LaTeX-examples)	https://raw.githubusercontent.com/MartinThoma/LaTeX-examples/master/documents/wohnung-checkliste/wohnung-checkliste.tex
+latex2e-sample2e.tex	artigo	LPPL 1.3c (LaTeX Project)	https://raw.githubusercontent.com/latex3/latex2e/develop/base/sample2e.tex
+latex2e-small2e.tex	artigo	LPPL 1.3c (LaTeX Project)	https://raw.githubusercontent.com/latex3/latex2e/develop/base/small2e.tex
+abntex2-modelo-artigo.tex	artigo	LPPL 1.3 (abnTeX2)	https://raw.githubusercontent.com/abntex/abntex2/master/doc/latex/abntex2/examples/abntex2-modelo-artigo.tex
+abntex2-modelo-trabalho-academico.tex	tese-abnt	LPPL 1.3 (abnTeX2)	https://raw.githubusercontent.com/abntex/abntex2/master/doc/latex/abntex2/examples/abntex2-modelo-trabalho-academico.tex
+abntex2-modelo-relatorio-tecnico.tex	relatorio	LPPL 1.3 (abnTeX2)	https://raw.githubusercontent.com/abntex/abntex2/master/doc/latex/abntex2/examples/abntex2-modelo-relatorio-tecnico.tex
+beamer-generic-talk.tex	apresentacao	GPL-2.0 com permissão extra de copiar/modificar como modelo (Till Tantau)	https://raw.githubusercontent.com/josephwright/beamer/main/doc/solutions/generic-talks/generic-ornate-15min-45min.en.tex
+ieee-bare-conf.tex	artigo	LPPL (Michael Shell, IEEEtran)	https://mirrors.ctan.org/macros/latex/contrib/IEEEtran/bare_conf.tex
+resume-sb2nov.tex	curriculo	MIT	https://raw.githubusercontent.com/sb2nov/resume/master/sourabh_bajaj_resume.tex
+resume-jakegut.tex	curriculo	MIT	https://raw.githubusercontent.com/jakegut/resume/master/resume.tex
+moderncv-template.tex	curriculo	LPPL 1.3c (moderncv)	https://raw.githubusercontent.com/moderncv/moderncv/master/template.tex
+homework-jdavis.tex	lista-de-exercicios	MIT	https://raw.githubusercontent.com/jdavis/latex-homework-template/master/homework.tex
+tufte-sample-handout.tex	artigo	Apache-2.0 (Tufte-LaTeX)	https://raw.githubusercontent.com/Tufte-LaTeX/tufte-latex/master/sample-handout.tex
+abntex2-modelo-projeto-pesquisa.tex	tese-abnt	LPPL 1.3 (abnTeX2)	https://raw.githubusercontent.com/abntex/abntex2/master/doc/latex/abntex2/examples/abntex2-modelo-projeto-pesquisa.tex
+abntex2-modelo-slides.tex	apresentacao	LPPL 1.3 (abnTeX2)	https://raw.githubusercontent.com/abntex/abntex2/master/doc/latex/abntex2/examples/abntex2-modelo-slides.tex
+latex2e-lppl.tex	exemplo	LPPL 1.3c (LaTeX Project)	https://raw.githubusercontent.com/latex3/latex2e/develop/base/lppl.tex
+altacv-sample.tex	curriculo	LPPL 1.3 (AltaCV)	https://raw.githubusercontent.com/liantze/AltaCV/main/sample.tex
+abntex2-modelo-include-comandos.tex	incluido-por-tese-abnt	LPPL 1.3 (abnTeX2)	https://raw.githubusercontent.com/abntex/abntex2/master/doc/latex/abntex2/examples/abntex2-modelo-include-comandos.tex

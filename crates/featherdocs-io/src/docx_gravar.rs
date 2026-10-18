@@ -1,0 +1,888 @@
+//! A árvore de blocos para `.docx` (Office Open XML), o formato que o Word, o
+//! LibreOffice e o Google Docs abrem. O `.docx` é um ZIP de XMLs; aqui se monta
+//! cada parte como texto, sem árvore DOM.
+//!
+//! Grava: títulos (estilos "heading N", com a numeração automática ligada aos
+//! estilos), parágrafo, citação, código, listas (nove tipos de marcador), tabelas,
+//! imagens (`data:` vira arquivo em `word/media/`, endereço da web vira imagem
+//! ligada), fórmulas (OMML, a equação nativa do Word, montada pelo `feather-math`), sumário e listas de figuras
+//! (campo `TOC`, que o Word atualiza ao abrir), legendas (campo `SEQ`), régua,
+//! quebra de página, links, formatação de caractere (negrito, itálico, sublinhado,
+//! tachado, fonte, tamanho, cor, realce, sobrescrito/subscrito) e de parágrafo
+//! (alinhamento, espaços, entrelinha, recuos, fundo, bordas), estilos com nome,
+//! papel e margens, cabeçalho e rodapé com campos, cor e borda da página,
+//! alinhamento vertical e números de linha.
+//!
+//! Não grava (ainda): marca d'água e a linguagem do bloco de código.
+//! O leitor (`docx.rs`) entende de volta tudo o que está aqui.
+
+use std::collections::BTreeSet;
+use std::fmt::Write as _;
+use std::io::{Cursor, Write};
+
+use featherdocs_core::layout::tamanho_base;
+use featherdocs_core::modelo::{Alinhamento, Atrib, Bloco, Celula, Conteudo, Documento, EstiloDeCitacao, Estilo, Faixas, Lista, Marca, Numeracao, NumeracaoDeLinhas, TipoDeRevisao, Trecho, Vertical, CODIGO, ITALICO, MATEMATICA, NEGRITO, SERIFA, SUBLINHADO, TACHADO};
+use zip::write::SimpleFileOptions;
+
+use crate::base64;
+
+const NS: &str = concat!(
+    "xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\" ",
+    "xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" ",
+    "xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\" ",
+    "xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" ",
+    "xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\" ",
+    "xmlns:m=\"http://schemas.openxmlformats.org/officeDocument/2006/math\""
+);
+const XML: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n";
+const REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+
+/// As fontes do Word que têm as mesmas medidas das que o FeatherDocs desenha (Liberation).
+pub const FONTE_SEM_SERIFA: &str = "Arial";
+pub const FONTE_SERIFA: &str = "Times New Roman";
+pub const FONTE_CODIGO: &str = "Courier New";
+
+/// O `numId` da numeração dos títulos (as listas usam 1, 2, 3…).
+const NUM_TITULOS: u32 = 1000;
+
+/// Os rótulos das legendas (o FeatherDocs numera sozinho; no Word é o campo `SEQ`).
+pub const ROTULOS_LEGENDA: [&str; 3] = ["Figura", "Tabela", "Equação"];
+
+/// Os marcadores padrão por nível (o leitor usa a mesma tabela para reconhecer o "Padrão").
+pub const MARCADORES_PADRAO: [&str; 3] = ["•", "◦", "▪"];
+
+/// Grava o documento num `.docx`.
+pub fn gravar(doc: &Documento) -> Result<Vec<u8>, String> {
+    let mut g = Gravador::novo(doc);
+    let corpo = g.corpo();
+    let mut partes: Vec<(String, Vec<u8>)> = vec![
+        ("word/document.xml".into(), corpo.into_bytes()),
+        ("word/styles.xml".into(), estilos_xml(doc).into_bytes()),
+        ("word/numbering.xml".into(), numeracao_xml(&g.nums, doc.estilos.numeracao).into_bytes()),
+        ("word/settings.xml".into(), configuracoes_xml(doc).into_bytes()),
+        ("word/header1.xml".into(), faixa_xml("hdr", &doc.extras.cabecalho, &doc.pagina).into_bytes()),
+        ("word/footer1.xml".into(), faixa_xml("ftr", &doc.extras.rodape, &doc.pagina).into_bytes()),
+        ("docProps/core.xml".into(), propriedades_xml(doc).into_bytes()),
+        ("_rels/.rels".into(), raiz_rels().into_bytes()),
+    ];
+    let notas = [!g.notas[0].is_empty(), !g.notas[1].is_empty()];
+    let fontes = !doc.bibliografia.fontes.is_empty();
+    let comentarios = !doc.comentarios.is_empty();
+    if comentarios {
+        let (c, x) = crate::docx_comentarios::gravar(&doc.comentarios);
+        partes.push(("word/comments.xml".into(), c.into_bytes()));
+        partes.push(("word/commentsExtended.xml".into(), x.into_bytes()));
+    }
+    if fontes {
+        partes.push(("customXml/item1.xml".into(), crate::docx_fontes::gravar(&doc.bibliografia).into_bytes()));
+        partes.push(("customXml/itemProps1.xml".into(), crate::docx_fontes::propriedades().into_bytes()));
+        partes.push(("customXml/_rels/item1.xml.rels".into(), format!("{XML}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{REL}/customXmlProps\" Target=\"itemProps1.xml\"/></Relationships>").into_bytes()));
+    }
+    for (k, (parte, raiz)) in [("word/footnotes.xml", "footnotes"), ("word/endnotes.xml", "endnotes")].into_iter().enumerate() {
+        if notas[k] {
+            partes.push((parte.into(), notas_xml(raiz, &g.notas[k]).into_bytes()));
+        }
+    }
+    partes.push(("word/_rels/document.xml.rels".into(), g.relacoes_xml(notas, fontes, comentarios).into_bytes()));
+    let extensoes: BTreeSet<String> = g.midias.iter().map(|(n, _)| n.rsplit('.').next().unwrap_or("png").to_string()).collect();
+    partes.push(("[Content_Types].xml".into(), tipos_xml(&extensoes, notas, fontes, comentarios).into_bytes()));
+    for (nome, bytes) in std::mem::take(&mut g.midias) {
+        partes.push((format!("word/media/{nome}"), bytes));
+    }
+    empacotar(partes)
+}
+
+fn empacotar(partes: Vec<(String, Vec<u8>)>) -> Result<Vec<u8>, String> {
+    let erro = |e: &dyn std::fmt::Display| format!("Não consegui gravar o .docx: {e}");
+    let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    let opcoes = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    for (nome, bytes) in partes {
+        zip.start_file(nome, opcoes).map_err(|e| erro(&e))?;
+        zip.write_all(&bytes).map_err(|e| erro(&e))?;
+    }
+    Ok(zip.finish().map_err(|e| erro(&e))?.into_inner())
+}
+
+// ---------------------------------------------------------------------------
+// Unidades e escape
+// ---------------------------------------------------------------------------
+
+/// Pontos para vigésimos de ponto (a unidade de medida do Word).
+fn twips(pt: f32) -> i64 {
+    (pt * 20.0).round() as i64
+}
+
+/// Pontos para EMU (as imagens).
+fn emu(pt: f32) -> i64 {
+    (pt * 12700.0).round() as i64
+}
+
+/// `0xRRGGBBAA` para `RRGGBB`.
+fn hex(cor: u32) -> String {
+    format!("{:06X}", cor >> 8)
+}
+
+fn esc(s: &str) -> String {
+    let mut saida = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => saida.push_str("&amp;"),
+            '<' => saida.push_str("&lt;"),
+            '>' => saida.push_str("&gt;"),
+            '"' => saida.push_str("&quot;"),
+            c if (c as u32) < 0x20 && !matches!(c, '\t' | '\n' | '\r') => {}
+            c => saida.push(c),
+        }
+    }
+    saida
+}
+
+/// Uma corrida de texto puro (o `xml:space` guarda os espaços das pontas).
+fn t(texto: &str) -> String {
+    format!("<w:t xml:space=\"preserve\">{}</w:t>", esc(texto))
+}
+
+// ---------------------------------------------------------------------------
+// O corpo
+// ---------------------------------------------------------------------------
+
+/// O tipo de lista, que vira um `abstractNum` (índice na tabela `TIPOS_DE_LISTA`).
+fn tipo_de_lista(ordenado: bool, a: &Atrib) -> usize {
+    match a.lista {
+        Lista::Padrao if ordenado => 1,
+        Lista::Padrao => 0,
+        Lista::Numerica => 1,
+        Lista::Alfabetica => 2,
+        Lista::Romana => 3,
+        Lista::Circulo => 4,
+        Lista::Quadrado => 5,
+        Lista::Seta => 6,
+        Lista::Tarefa if a.marcado => 8,
+        Lista::Tarefa => 7,
+    }
+}
+
+/// `(numFmt, lvlText do nível 0 — "%1" é o número; nos marcadores, o caractere)`.
+const TIPOS_DE_LISTA: [(&str, &str); 9] = [("bullet", ""), ("decimal", "%1."), ("lowerLetter", "%1)"), ("upperRoman", "%1."), ("bullet", "◦"), ("bullet", "▪"), ("bullet", "➢"), ("bullet", "☐"), ("bullet", "☒")];
+
+/// Uma numeração concreta (`w:num`): o tipo e se recomeça do 1.
+struct Num {
+    tipo: usize,
+    recomeca: bool,
+}
+
+struct Gravador<'a> {
+    doc: &'a Documento,
+    /// `(Id, tipo, alvo, externo)`; os fixos (estilos, numeração…) vêm à parte.
+    rels: Vec<(String, &'static str, String, bool)>,
+    midias: Vec<(String, Vec<u8>)>,
+    nums: Vec<Num>,
+    /// O `numId` em uso por tipo de lista, dentro da lista atual.
+    em_uso: [Option<u32>; 9],
+    anterior_item: bool,
+    figuras: u32,
+    legendas: [u32; 3],
+    /// O XML de cada nota de rodapé (0) e de fim (1), na ordem: o `w:id` é a posição + 1.
+    notas: [Vec<String>; 2],
+    /// Quantas sugestões já foram (o `w:id` de cada `w:ins`/`w:del`).
+    revisoes: u32,
+}
+
+impl<'a> Gravador<'a> {
+    fn novo(doc: &'a Documento) -> Self {
+        Self { doc, rels: Vec::new(), midias: Vec::new(), nums: Vec::new(), em_uso: [None; 9], anterior_item: false, figuras: 0, legendas: [0; 3], notas: [Vec::new(), Vec::new()], revisoes: 0 }
+    }
+
+    fn rel(&mut self, tipo: &'static str, alvo: String, externo: bool) -> String {
+        let id = format!("rIdF{}", self.rels.len() + 1);
+        self.rels.push((id.clone(), tipo, alvo, externo));
+        id
+    }
+
+    fn corpo(&mut self) -> String {
+        let mut s = format!("{XML}<w:document {NS}>");
+        if self.doc.extras.cor_pagina != 0 {
+            let _ = write!(s, "<w:background w:color=\"{}\"/>", hex(self.doc.extras.cor_pagina));
+        }
+        s.push_str("<w:body>");
+        for b in &self.doc.blocos {
+            let x = self.bloco(b);
+            s.push_str(&x);
+        }
+        s.push_str(&secao(self.doc));
+        s.push_str("</w:body></w:document>");
+        s
+    }
+
+    fn bloco(&mut self, b: &Bloco) -> String {
+        let item = matches!(b.conteudo, Conteudo::Item { .. });
+        if !item || !self.anterior_item {
+            self.em_uso = [None; 9];
+        }
+        self.anterior_item = item;
+        match &b.conteudo {
+            Conteudo::Titulo { nivel, texto } => self.titulo(b, *nivel, texto),
+            Conteudo::Paragrafo { texto } => self.paragrafo(b, texto),
+            Conteudo::Item { ordenado, nivel, texto } => self.item(b, *ordenado, *nivel, texto),
+            Conteudo::Citacao { texto } => format!("<w:p>{}{}</w:p>", ppr(Some("Quote"), &b.atrib, ""), self.trechos(texto)),
+            Conteudo::Codigo { codigo, .. } => codigo_xml(codigo, &b.atrib),
+            Conteudo::Tabela { cabecalho, linhas } => self.tabela(*cabecalho, linhas, &b.mesclagens),
+            Conteudo::Imagem { origem, legenda, largura, altura } => self.imagem(origem, legenda, *largura, *altura),
+            Conteudo::Equacao { latex } => format!("<w:p>{}<m:oMathPara><m:oMath>{}</m:oMath></m:oMathPara></w:p>", ppr(None, &b.atrib, ""), formula_omml(latex, true)),
+            Conteudo::Sumario { niveis, sem_numeros, lista, .. } => sumario_xml(*niveis, *sem_numeros, *lista),
+            Conteudo::Regua => "<w:p><w:pPr><w:pBdr><w:bottom w:val=\"single\" w:sz=\"6\" w:space=\"1\" w:color=\"auto\"/></w:pBdr></w:pPr></w:p>".into(),
+            Conteudo::QuebraDePagina => "<w:p><w:r><w:br w:type=\"page\"/></w:r></w:p>".into(),
+            Conteudo::Bibliografia { todas } => self.bibliografia(*todas),
+            Conteudo::IndiceRemissivo => lista_em_campo(" INDEX \\e \"\t\" \\h \"A\" \\c \"1\" ", "Índice", &[(String::new(), "Atualize o campo (F9) para montar o índice.".to_string())]),
+        }
+    }
+
+    /// A lista de referências: o campo `BIBLIOGRAPHY` do Word com as referências já no estilo do
+    /// documento (o Word, se atualizado, refaz no estilo dele).
+    fn bibliografia(&mut self, todas: bool) -> String {
+        let b = &self.doc.bibliografia;
+        let citadas = featherdocs_core::citacoes::chaves_citadas(&self.doc.blocos);
+        let entradas = featherdocs_core::bibliografia::lista(b.estilo, &b.fontes, &citadas, todas);
+        let recuo = if matches!(b.estilo, EstiloDeCitacao::Abnt) { 0.0 } else { 30.0 };
+        let atrib = Atrib { recuo_esq: recuo, primeira: -recuo, depois: Some(8.0), ..Atrib::default() };
+        let paragrafos: Vec<(String, String)> = entradas.iter().map(|t| (ppr(None, &atrib, ""), t.iter().map(corrida).collect())).collect();
+        let instr = if todas { " BIBLIOGRAPHY \\l 1046 \\f 1 " } else { " BIBLIOGRAPHY \\l 1046 " };
+        lista_em_campo_xml(instr, "Referências", &paragrafos)
+    }
+
+    /// O estilo com nome do bloco, se tiver (o `styleId` que `estilos_xml` cria).
+    fn estilo_com_nome(&self, b: &Bloco) -> Option<String> {
+        self.doc.estilos.do_bloco(b).map(|e| format!("FDEstilo{}", e.id))
+    }
+
+    fn titulo(&mut self, b: &Bloco, nivel: u8, texto: &[Trecho]) -> String {
+        let estilo = self.estilo_com_nome(b).unwrap_or_else(|| format!("Heading{}", nivel.clamp(1, 6)));
+        let extra = if b.atrib.sem_numero && self.doc.estilos.numeracao != Numeracao::Nenhuma { "<w:numPr><w:ilvl w:val=\"0\"/><w:numId w:val=\"0\"/></w:numPr>" } else { "" };
+        format!("<w:p>{}{}</w:p>", ppr(Some(&estilo), &b.atrib, extra), self.trechos(texto))
+    }
+
+    fn paragrafo(&mut self, b: &Bloco, texto: &[Trecho]) -> String {
+        if b.atrib.legenda > 0 {
+            return self.legenda(b, texto);
+        }
+        let estilo = self.estilo_com_nome(b);
+        format!("<w:p>{}{}</w:p>", ppr(estilo.as_deref(), &b.atrib, ""), self.trechos(texto))
+    }
+
+    /// "Figura 1 – texto": o número é o campo `SEQ`, que o Word recalcula.
+    fn legenda(&mut self, b: &Bloco, texto: &[Trecho]) -> String {
+        let i = usize::from(b.atrib.legenda.clamp(1, 3)) - 1;
+        self.legendas[i] += 1;
+        let rotulo = ROTULOS_LEGENDA[i];
+        let campo = format!("<w:fldSimple w:instr=\" SEQ {rotulo} \\* ARABIC \"><w:r>{}</w:r></w:fldSimple>", t(&self.legendas[i].to_string()));
+        format!("<w:p>{}<w:r>{}</w:r>{campo}<w:r>{}</w:r>{}</w:p>", ppr(Some("Caption"), &b.atrib, ""), t(&format!("{rotulo} ")), t(" – "), self.trechos(texto))
+    }
+
+    fn item(&mut self, b: &Bloco, ordenado: bool, nivel: u8, texto: &[Trecho]) -> String {
+        let tipo = tipo_de_lista(ordenado, &b.atrib);
+        if b.atrib.reiniciar {
+            self.em_uso[tipo] = None;
+        }
+        let num = match self.em_uso[tipo] {
+            Some(n) => n,
+            None => {
+                let recomeca = self.nums.iter().any(|n| n.tipo == tipo);
+                self.nums.push(Num { tipo, recomeca });
+                let n = self.nums.len() as u32;
+                self.em_uso[tipo] = Some(n);
+                n
+            }
+        };
+        let extra = format!("<w:numPr><w:ilvl w:val=\"{}\"/><w:numId w:val=\"{num}\"/></w:numPr>", nivel.min(8));
+        format!("<w:p>{}{}</w:p>", ppr(Some("ListParagraph"), &b.atrib, &extra), self.trechos(texto))
+    }
+
+    fn trechos(&mut self, ts: &[Trecho]) -> String {
+        let mut s = String::new();
+        for tr in ts {
+            if let Some(m) = tr.marca.as_deref() {
+                let x = self.objeto(tr, m);
+                s.push_str(&x);
+                continue;
+            }
+            let corrida = self.com_revisao(tr, corrida(tr));
+            match &tr.link {
+                Some(u) if u.starts_with('#') => {
+                    let _ = write!(s, "<w:hyperlink w:anchor=\"{}\">{corrida}</w:hyperlink>", esc(&u[1..]));
+                }
+                Some(u) => {
+                    let id = self.rel("hyperlink", u.clone(), true);
+                    let _ = write!(s, "<w:hyperlink r:id=\"{id}\">{corrida}</w:hyperlink>");
+                }
+                None => s.push_str(&corrida),
+            }
+        }
+        s
+    }
+
+    /// A corrida dentro de `w:ins` ou `w:del` quando o trecho é uma sugestão (o texto apagado vai em `w:delText`).
+    fn com_revisao(&mut self, tr: &Trecho, corrida: String) -> String {
+        let Some(r) = tr.rev.as_deref() else { return corrida };
+        self.revisoes += 1;
+        let data = crate::docx_comentarios::data_iso(&r.quando);
+        let data = if data.is_empty() { String::new() } else { format!(" w:date=\"{data}\"") };
+        let autor = if r.autor.is_empty() { "FeatherDocs" } else { &r.autor };
+        match r.tipo {
+            TipoDeRevisao::Insercao => format!("<w:ins w:id=\"{}\" w:author=\"{}\"{data}>{corrida}</w:ins>", self.revisoes, esc(autor)),
+            TipoDeRevisao::Remocao => format!("<w:del w:id=\"{}\" w:author=\"{}\"{data}>{}</w:del>", self.revisoes, esc(autor), corrida.replace("<w:t ", "<w:delText ").replace("<w:t>", "<w:delText>").replace("</w:t>", "</w:delText>")),
+        }
+    }
+
+    /// Um objeto preso ao texto: a chamada da nota (e o texto dela vai para `footnotes.xml`), o campo
+    /// `XE` do índice, o campo de dados ou a citação.
+    fn objeto(&mut self, tr: &Trecho, m: &Marca) -> String {
+        match m {
+            Marca::Nota { fim, texto } => {
+                let k = usize::from(*fim);
+                let id = self.notas[k].len() + 1;
+                let (tag, marca) = if *fim { ("endnote", "endnoteRef") } else { ("footnote", "footnoteRef") };
+                let corpo: String = texto.iter().filter(|t| t.marca.is_none()).map(corrida).collect();
+                let sobrescrito = "<w:rPr><w:vertAlign w:val=\"superscript\"/></w:rPr>";
+                self.notas[k].push(format!("<w:{tag} w:id=\"{id}\"><w:p><w:r>{sobrescrito}<w:{marca}/></w:r><w:r><w:t xml:space=\"preserve\"> </w:t></w:r>{corpo}</w:p></w:{tag}>"));
+                format!("<w:r>{sobrescrito}<w:{tag}Reference w:id=\"{id}\"/></w:r>")
+            }
+            Marca::Indice { termo, sub } => {
+                let entrada = if sub.is_empty() { termo.clone() } else { format!("{termo}:{sub}") };
+                campo_complexo(&format!(" XE \"{}\" ", entrada.replace('"', "'")), "")
+            }
+            Marca::Campo { campo } => {
+                let instr = match campo.as_str() {
+                    "autor" => "AUTHOR",
+                    "titulo" => "TITLE",
+                    "data" => "DATE \\@ \"dd/MM/yyyy\"",
+                    "pagina" => "PAGE",
+                    "paginas" => "NUMPAGES",
+                    _ => "FILENAME",
+                };
+                format!("<w:fldSimple w:instr=\" {} \"><w:r>{}{}</w:r></w:fldSimple>", esc(instr), rpr(tr), t(&tr.rotulo))
+            }
+            Marca::Comentario { id, fim } => {
+                let ids = self.doc.comentarios.iter().find(|c| c.id == *id).map(crate::docx_comentarios::ids).unwrap_or_else(|| vec![*id]);
+                ids.iter()
+                    .map(|i| if *fim { format!("<w:commentRangeEnd w:id=\"{i}\"/><w:r><w:commentReference w:id=\"{i}\"/></w:r>") } else { format!("<w:commentRangeStart w:id=\"{i}\"/>") })
+                    .collect()
+            }
+            Marca::Citacao { chaves, pagina } => {
+                let p = if pagina.is_empty() { String::new() } else { format!(" \\p {pagina}") };
+                let rotulo = if tr.rotulo.is_empty() { format!("({})", chaves.join("; ")) } else { tr.rotulo.clone() };
+                format!("<w:fldSimple w:instr=\" CITATION {}{} \"><w:r>{}{}</w:r></w:fldSimple>", esc(&chaves.join(" \\m ")), esc(&p), rpr(tr), t(&rotulo))
+            }
+        }
+    }
+
+    fn tabela(&mut self, cabecalho: bool, linhas: &[Vec<Celula>], mesclagens: &[featherdocs_core::modelo::MesclagemTabela]) -> String {
+        let cols = linhas.iter().map(Vec::len).max().unwrap_or(1).max(1);
+        let largura = twips(self.doc.pagina.largura_util()) / cols as i64;
+        let borda = |lado: &str| format!("<w:{lado} w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"BFBFBF\"/>");
+        let bordas: String = ["top", "left", "bottom", "right", "insideH", "insideV"].iter().map(|l| borda(l)).collect();
+        let mut s = format!("<w:tbl><w:tblPr><w:tblW w:w=\"{}\" w:type=\"dxa\"/><w:tblBorders>{bordas}</w:tblBorders><w:tblCellMar><w:left w:w=\"80\" w:type=\"dxa\"/><w:right w:w=\"80\" w:type=\"dxa\"/></w:tblCellMar></w:tblPr><w:tblGrid>", largura * cols as i64);
+        for _ in 0..cols {
+            let _ = write!(s, "<w:gridCol w:w=\"{largura}\"/>");
+        }
+        s.push_str("</w:tblGrid>");
+        for (i, linha) in linhas.iter().enumerate() {
+            let topo = cabecalho && i == 0;
+            s.push_str(if topo { "<w:tr><w:trPr><w:tblHeader/></w:trPr>" } else { "<w:tr>" });
+            let mut c = 0;
+            while c < cols {
+                let regiao = mesclagens.iter().find(|m| m.linha == i && m.coluna == c
+                    && m.colunas >= 2 && c.checked_add(m.colunas).is_some_and(|fim| fim <= cols));
+                let n = regiao.map_or(1, |m| m.colunas);
+                let fundo = if topo { "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"F2F2F2\"/>" } else { "" };
+                let span = if n > 1 { format!("<w:gridSpan w:val=\"{n}\"/>") } else { String::new() };
+                let texto = linha.get(c).map(|cel| self.trechos(cel)).unwrap_or_default();
+                let _ = write!(s, "<w:tc><w:tcPr><w:tcW w:w=\"{}\" w:type=\"dxa\"/>{fundo}{span}</w:tcPr><w:p><w:pPr><w:spacing w:before=\"40\" w:after=\"40\"/></w:pPr>{texto}</w:p></w:tc>", largura * n as i64);
+                c += n;
+            }
+            s.push_str("</w:tr>");
+        }
+        s.push_str("</w:tbl>");
+        s
+    }
+
+    fn imagem(&mut self, origem: &str, legenda: &[Trecho], largura: f32, altura: f32) -> String {
+        let (w, h) = if largura > 0.0 && altura > 0.0 { (largura, altura) } else { (300.0, 200.0) };
+        let util = self.doc.pagina.largura_util();
+        let (w, h) = if w > util { (util, h * util / w) } else { (w, h) };
+        let blip = if let Some((tipo, bytes)) = base64::de_data_url(origem) {
+            self.figuras += 1;
+            let ext = match tipo.as_str() {
+                "image/jpeg" | "image/jpg" => "jpeg",
+                "image/gif" => "gif",
+                "image/bmp" => "bmp",
+                "image/svg+xml" => "svg",
+                "image/webp" => "webp",
+                _ => "png",
+            };
+            let nome = format!("imagem{}.{ext}", self.figuras);
+            self.midias.push((nome.clone(), bytes));
+            format!("r:embed=\"{}\"", self.rel("image", format!("media/{nome}"), false))
+        } else if origem.starts_with("http://") || origem.starts_with("https://") {
+            self.figuras += 1;
+            format!("r:link=\"{}\"", self.rel("image", origem.to_string(), true))
+        } else {
+            return format!("<w:p><w:r>{}</w:r></w:p>", t(&format!("[imagem: {origem}]")));
+        };
+        let n = self.figuras;
+        let (cx, cy) = (emu(w), emu(h));
+        let desenho = format!(
+            "<w:drawing><wp:inline distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"{cx}\" cy=\"{cy}\"/><wp:docPr id=\"{n}\" name=\"Imagem {n}\"/><a:graphic><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic><pic:nvPicPr><pic:cNvPr id=\"{n}\" name=\"Imagem {n}\"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip {blip}/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>"
+        );
+        let mut s = format!("<w:p><w:pPr><w:jc w:val=\"center\"/></w:pPr><w:r>{desenho}</w:r></w:p>");
+        if !legenda.is_empty() {
+            let _ = write!(s, "<w:p><w:pPr><w:pStyle w:val=\"FDLegendaImagem\"/></w:pPr>{}</w:p>", self.trechos(legenda));
+        }
+        s
+    }
+
+    fn relacoes_xml(&self, notas: [bool; 2], fontes: bool, comentarios: bool) -> String {
+        let mut s = format!("{XML}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">");
+        for (id, tipo, alvo) in [("rIdEstilos", "styles", "styles.xml"), ("rIdNumeracao", "numbering", "numbering.xml"), ("rIdConfig", "settings", "settings.xml"), ("rIdCabecalho", "header", "header1.xml"), ("rIdRodape", "footer", "footer1.xml")] {
+            let _ = write!(s, "<Relationship Id=\"{id}\" Type=\"{REL}/{tipo}\" Target=\"{alvo}\"/>");
+        }
+        for (k, (id, tipo, alvo)) in [("rIdNotas", "footnotes", "footnotes.xml"), ("rIdNotasFim", "endnotes", "endnotes.xml")].into_iter().enumerate() {
+            if notas[k] {
+                let _ = write!(s, "<Relationship Id=\"{id}\" Type=\"{REL}/{tipo}\" Target=\"{alvo}\"/>");
+            }
+        }
+        if fontes {
+            let _ = write!(s, "<Relationship Id=\"rIdFontes\" Type=\"{REL}/customXml\" Target=\"../customXml/item1.xml\"/>");
+        }
+        if comentarios {
+            let _ = write!(s, "<Relationship Id=\"rIdComentarios\" Type=\"{REL}/comments\" Target=\"comments.xml\"/>");
+            s.push_str("<Relationship Id=\"rIdComentariosEx\" Type=\"http://schemas.microsoft.com/office/2011/relationships/commentsExtended\" Target=\"commentsExtended.xml\"/>");
+        }
+        for (id, tipo, alvo, externo) in &self.rels {
+            let modo = if *externo { " TargetMode=\"External\"" } else { "" };
+            let _ = write!(s, "<Relationship Id=\"{id}\" Type=\"{REL}/{tipo}\" Target=\"{}\"{modo}/>", esc(alvo));
+        }
+        s.push_str("</Relationships>");
+        s
+    }
+}
+
+/// As propriedades de parágrafo, na ordem que o esquema do Word exige.
+fn ppr(estilo: Option<&str>, a: &Atrib, numeracao: &str) -> String {
+    let mut s = String::new();
+    if let Some(e) = estilo {
+        let _ = write!(s, "<w:pStyle w:val=\"{e}\"/>");
+    }
+    s.push_str(numeracao);
+    s.push_str(&bordas_do_paragrafo(a));
+    if a.fundo != 0 {
+        let _ = write!(s, "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"{}\"/>", hex(a.fundo));
+    }
+    s.push_str(&espacos(a.antes, a.depois, a.entrelinha));
+    if a.recuo_esq != 0.0 || a.recuo_dir != 0.0 || a.primeira != 0.0 {
+        let primeira = if a.primeira < 0.0 { format!(" w:hanging=\"{}\"", twips(-a.primeira)) } else if a.primeira > 0.0 { format!(" w:firstLine=\"{}\"", twips(a.primeira)) } else { String::new() };
+        let _ = write!(s, "<w:ind w:left=\"{}\" w:right=\"{}\"{primeira}/>", twips(a.recuo_esq), twips(a.recuo_dir));
+    }
+    s.push_str(&alinhamento(a.alinhamento));
+    if s.is_empty() {
+        s
+    } else {
+        format!("<w:pPr>{s}</w:pPr>")
+    }
+}
+
+fn espacos(antes: Option<f32>, depois: Option<f32>, entrelinha: f32) -> String {
+    if antes.is_none() && depois.is_none() && entrelinha <= 0.0 {
+        return String::new();
+    }
+    let mut s = String::from("<w:spacing");
+    if let Some(v) = antes {
+        let _ = write!(s, " w:before=\"{}\"", twips(v));
+    }
+    if let Some(v) = depois {
+        let _ = write!(s, " w:after=\"{}\"", twips(v));
+    }
+    if entrelinha > 0.0 {
+        let _ = write!(s, " w:line=\"{}\" w:lineRule=\"auto\"", (entrelinha * 240.0).round() as i64);
+    }
+    s.push_str("/>");
+    s
+}
+
+fn alinhamento(a: Alinhamento) -> String {
+    match a {
+        Alinhamento::Esquerda => String::new(),
+        Alinhamento::Centro => "<w:jc w:val=\"center\"/>".into(),
+        Alinhamento::Direita => "<w:jc w:val=\"right\"/>".into(),
+        Alinhamento::Justificado => "<w:jc w:val=\"both\"/>".into(),
+    }
+}
+
+fn bordas_do_paragrafo(a: &Atrib) -> String {
+    if a.borda == 0 {
+        return String::new();
+    }
+    let cor = if a.cor_borda != 0 { hex(a.cor_borda) } else { "auto".into() };
+    let mut s = String::from("<w:pBdr>");
+    for (bit, lado) in [(4, "top"), (1, "left"), (8, "bottom"), (2, "right")] {
+        if a.borda & bit != 0 {
+            let _ = write!(s, "<w:{lado} w:val=\"single\" w:sz=\"6\" w:space=\"4\" w:color=\"{cor}\"/>");
+        }
+    }
+    s.push_str("</w:pBdr>");
+    s
+}
+
+/// As propriedades de caractere de um trecho (vazio = nenhuma).
+fn rpr(tr: &Trecho) -> String {
+    let e = tr.estilo;
+    let mut s = String::new();
+    if tr.link.is_some() {
+        s.push_str("<w:rStyle w:val=\"Hyperlink\"/>");
+    }
+    let fonte = if e & CODIGO != 0 { Some(FONTE_CODIGO) } else if e & SERIFA != 0 { Some(FONTE_SERIFA) } else { None };
+    if let Some(f) = fonte {
+        let _ = write!(s, "<w:rFonts w:ascii=\"{f}\" w:hAnsi=\"{f}\" w:cs=\"{f}\"/>");
+    }
+    for (bit, tag) in [(NEGRITO, "<w:b/>"), (ITALICO, "<w:i/>"), (TACHADO, "<w:strike/>")] {
+        if e & bit != 0 {
+            s.push_str(tag);
+        }
+    }
+    let f = &tr.fmt;
+    if f.cor != 0 {
+        let _ = write!(s, "<w:color w:val=\"{}\"/>", hex(f.cor));
+    }
+    if f.tamanho > 0.0 {
+        let _ = write!(s, "<w:sz w:val=\"{0}\"/><w:szCs w:val=\"{0}\"/>", (f.tamanho * 2.0).round() as i64);
+    }
+    if e & SUBLINHADO != 0 {
+        s.push_str("<w:u w:val=\"single\"/>");
+    }
+    if f.realce != 0 {
+        let _ = write!(s, "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"{}\"/>", hex(f.realce));
+    }
+    match f.posicao {
+        1 => s.push_str("<w:vertAlign w:val=\"superscript\"/>"),
+        -1 => s.push_str("<w:vertAlign w:val=\"subscript\"/>"),
+        _ => {}
+    }
+    if s.is_empty() {
+        s
+    } else {
+        format!("<w:rPr>{s}</w:rPr>")
+    }
+}
+
+/// A fórmula como equação nativa do Word (OMML, do `feather-math`); vazia, o LaTeX cru numa corrida.
+fn formula_omml(latex: &str, exibida: bool) -> String {
+    let x = feather_math::omml::omml(latex, exibida);
+    if x.is_empty() {
+        format!("<m:r><m:t>{}</m:t></m:r>", esc(latex))
+    } else {
+        x
+    }
+}
+
+/// Uma corrida (`w:r`): o texto com tabulações e quebras de linha; fórmula em linha vira `m:oMath`.
+fn corrida(tr: &Trecho) -> String {
+    if tr.estilo & MATEMATICA != 0 {
+        return format!("<m:oMath>{}</m:oMath>", formula_omml(&tr.texto, false));
+    }
+    let mut s = format!("<w:r>{}", rpr(tr));
+    for (i, linha) in tr.texto.split('\n').enumerate() {
+        if i > 0 {
+            s.push_str("<w:br/>");
+        }
+        for (j, pedaco) in linha.split('\t').enumerate() {
+            if j > 0 {
+                s.push_str("<w:tab/>");
+            }
+            if !pedaco.is_empty() {
+                s.push_str(&t(pedaco));
+            }
+        }
+    }
+    s.push_str("</w:r>");
+    s
+}
+
+/// O bloco de código: um parágrafo só, com as linhas separadas por `w:br`.
+fn codigo_xml(codigo: &str, a: &Atrib) -> String {
+    let mut s = format!("<w:p>{}<w:r>", ppr(Some("Code"), a, ""));
+    for (i, linha) in codigo.split('\n').enumerate() {
+        if i > 0 {
+            s.push_str("<w:br/>");
+        }
+        s.push_str(&t(linha));
+    }
+    s.push_str("</w:r></w:p>");
+    s
+}
+
+/// O sumário (ou a lista de figuras/tabelas) como campo `TOC`; o Word o preenche ao abrir.
+/// Uma lista gerada (bibliografia, índice) como um campo complexo que ocupa vários parágrafos: o
+/// título e os parágrafos são o resultado do campo (o leitor joga fora e refaz).
+fn lista_em_campo(instr: &str, titulo: &str, linhas: &[(String, String)]) -> String {
+    let paragrafos: Vec<(String, String)> = linhas.iter().map(|(ppr, texto)| (ppr.clone(), format!("<w:r>{}</w:r>", t(texto)))).collect();
+    lista_em_campo_xml(instr, titulo, &paragrafos)
+}
+
+/// Como `lista_em_campo`, com as corridas já em XML: `(pPr, corridas)` por parágrafo.
+fn lista_em_campo_xml(instr: &str, titulo: &str, paragrafos: &[(String, String)]) -> String {
+    let mut s = format!(
+        "<w:p><w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText xml:space=\"preserve\">{}</w:instrText></w:r><w:r><w:fldChar w:fldCharType=\"separate\"/></w:r><w:r><w:rPr><w:b/><w:sz w:val=\"32\"/></w:rPr>{}</w:r></w:p>",
+        esc(instr),
+        t(titulo)
+    );
+    for (ppr, corridas) in paragrafos {
+        let _ = write!(s, "<w:p>{ppr}{corridas}</w:p>");
+    }
+    s.push_str("<w:p><w:r><w:fldChar w:fldCharType=\"end\"/></w:r></w:p>");
+    s
+}
+
+fn sumario_xml(niveis: u8, sem_numeros: bool, lista: u8) -> String {
+    let (titulo, instr) = match lista {
+        1 => ("Lista de figuras", format!("TOC \\h \\z \\c \"{}\"", ROTULOS_LEGENDA[0])),
+        2 => ("Lista de tabelas", format!("TOC \\h \\z \\c \"{}\"", ROTULOS_LEGENDA[1])),
+        _ => ("Sumário", format!("TOC \\o \"1-{}\" \\h \\z \\u", niveis.clamp(1, 9))),
+    };
+    let instr = if sem_numeros { format!("{instr} \\n") } else { instr };
+    format!(
+        "<w:p><w:pPr><w:pStyle w:val=\"TOCHeading\"/></w:pPr><w:r>{}</w:r></w:p><w:p><w:fldSimple w:instr=\" {} \"><w:r>{}</w:r></w:fldSimple></w:p>",
+        t(titulo),
+        esc(&instr),
+        t("Atualize o campo (F9) para montar o sumário.")
+    )
+}
+
+/// As propriedades da seção: cabeçalho, rodapé, papel, margens, borda, números de linha, alinhamento vertical.
+fn secao(doc: &Documento) -> String {
+    let p = &doc.pagina;
+    let x = &doc.extras;
+    let mut s = String::from("<w:sectPr><w:headerReference w:type=\"default\" r:id=\"rIdCabecalho\"/><w:footerReference w:type=\"default\" r:id=\"rIdRodape\"/>");
+    let paisagem = if p.largura > p.altura { " w:orient=\"landscape\"" } else { "" };
+    let _ = write!(s, "<w:pgSz w:w=\"{}\" w:h=\"{}\"{paisagem}/>", twips(p.largura), twips(p.altura));
+    let _ = write!(s, "<w:pgMar w:top=\"{}\" w:right=\"{}\" w:bottom=\"{}\" w:left=\"{}\" w:header=\"708\" w:footer=\"708\" w:gutter=\"0\"/>", twips(p.margem_sup), twips(p.margem_dir), twips(p.margem_inf), twips(p.margem_esq));
+    if x.borda_cor != 0 {
+        let sz = ((x.borda_espessura.max(0.25) * 8.0).round() as i64).clamp(2, 96);
+        let espaco = (x.borda_distancia.round() as i64).clamp(0, 31);
+        let lado = |l: &str| format!("<w:{l} w:val=\"single\" w:sz=\"{sz}\" w:space=\"{espaco}\" w:color=\"{}\"/>", hex(x.borda_cor));
+        let _ = write!(s, "<w:pgBorders w:offsetFrom=\"page\">{}{}{}{}</w:pgBorders>", lado("top"), lado("left"), lado("bottom"), lado("right"));
+    }
+    match x.numerar_linhas {
+        NumeracaoDeLinhas::Nenhuma => {}
+        NumeracaoDeLinhas::Continua => s.push_str("<w:lnNumType w:countBy=\"1\" w:restart=\"continuous\"/>"),
+        NumeracaoDeLinhas::PorPagina => s.push_str("<w:lnNumType w:countBy=\"1\" w:restart=\"newPage\"/>"),
+    }
+    match x.vertical {
+        Vertical::Topo => {}
+        Vertical::Centro => s.push_str("<w:vAlign w:val=\"center\"/>"),
+        Vertical::Base => s.push_str("<w:vAlign w:val=\"bottom\"/>"),
+    }
+    if x.primeira_diferente {
+        s.push_str("<w:titlePg/>");
+    }
+    s.push_str("</w:sectPr>");
+    s
+}
+
+// ---------------------------------------------------------------------------
+// As partes de apoio
+// ---------------------------------------------------------------------------
+
+/// Cabeçalho ou rodapé: esquerda, centro e direita separados por tabulação (centro e direita).
+fn faixa_xml(raiz: &str, f: &Faixas, p: &featherdocs_core::modelo::ConfigPagina) -> String {
+    let util = twips(p.largura_util());
+    let mut s = format!("{XML}<w:{raiz} {NS}>");
+    if f.vazia() {
+        let _ = write!(s, "<w:p/></w:{raiz}>");
+        return s;
+    }
+    let _ = write!(s, "<w:p><w:pPr><w:tabs><w:tab w:val=\"center\" w:pos=\"{}\"/><w:tab w:val=\"right\" w:pos=\"{util}\"/></w:tabs></w:pPr>", util / 2);
+    for (i, texto) in [&f.esquerda, &f.centro, &f.direita].into_iter().enumerate() {
+        if i > 0 {
+            s.push_str("<w:r><w:tab/></w:r>");
+        }
+        s.push_str(&texto_com_campos(texto));
+    }
+    let _ = write!(s, "</w:p></w:{raiz}>");
+    s
+}
+
+/// `{pagina}`, `{total}`, `{pagina_romano}`, `{titulo}` e `{autor}` viram campos do Word.
+pub(crate) const CAMPOS: [(&str, &str); 5] = [("{pagina}", "PAGE"), ("{total}", "NUMPAGES"), ("{pagina_romano}", "PAGE \\* roman"), ("{titulo}", "TITLE"), ("{autor}", "AUTHOR")];
+
+fn texto_com_campos(texto: &str) -> String {
+    let mut s = String::new();
+    let mut resto = texto;
+    while !resto.is_empty() {
+        let proximo = CAMPOS.iter().filter_map(|(marca, instr)| resto.find(marca).map(|i| (i, *marca, *instr))).min_by_key(|(i, ..)| *i);
+        let Some((i, marca, instr)) = proximo else {
+            let _ = write!(s, "<w:r>{}</w:r>", t(resto));
+            break;
+        };
+        if i > 0 {
+            let _ = write!(s, "<w:r>{}</w:r>", t(&resto[..i]));
+        }
+        let _ = write!(s, "<w:fldSimple w:instr=\" {} \"><w:r>{}</w:r></w:fldSimple>", esc(instr), t("1"));
+        resto = &resto[i + marca.len()..];
+    }
+    s
+}
+
+fn estilo_de_paragrafo(id: &str, nome: &str, base: Option<&str>, ppr: &str, rpr: &str) -> String {
+    let base = base.map(|b| format!("<w:basedOn w:val=\"{b}\"/><w:next w:val=\"Normal\"/>")).unwrap_or_default();
+    format!("<w:style w:type=\"paragraph\" w:styleId=\"{id}\"><w:name w:val=\"{}\"/>{base}<w:qFormat/><w:pPr>{ppr}</w:pPr><w:rPr>{rpr}</w:rPr></w:style>", esc(nome))
+}
+
+fn estilos_xml(doc: &Documento) -> String {
+    let fonte = |f: &str| format!("<w:rFonts w:ascii=\"{f}\" w:hAnsi=\"{f}\" w:cs=\"{f}\"/>");
+    let mut s = format!(
+        "{XML}<w:styles {NS}><w:docDefaults><w:rPrDefault><w:rPr>{}<w:sz w:val=\"22\"/><w:szCs w:val=\"22\"/><w:lang w:val=\"pt-BR\"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after=\"120\" w:line=\"276\" w:lineRule=\"auto\"/></w:pPr></w:pPrDefault></w:docDefaults>",
+        fonte(FONTE_SEM_SERIFA)
+    );
+    s.push_str("<w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/><w:qFormat/></w:style>");
+    let numerados = doc.estilos.numeracao != Numeracao::Nenhuma;
+    for n in 1..=6u8 {
+        let tam = (tamanho_base(&Conteudo::Titulo { nivel: n, texto: Vec::new() }) * 2.0).round() as i64;
+        let num = if numerados { format!("<w:numPr><w:ilvl w:val=\"{}\"/><w:numId w:val=\"{NUM_TITULOS}\"/></w:numPr>", n - 1) } else { String::new() };
+        let ppr = format!("<w:keepNext/>{num}<w:spacing w:before=\"240\" w:after=\"120\"/><w:outlineLvl w:val=\"{}\"/>", n - 1);
+        s.push_str(&estilo_de_paragrafo(&format!("Heading{n}"), &format!("heading {n}"), Some("Normal"), &ppr, &format!("<w:b/><w:sz w:val=\"{tam}\"/><w:szCs w:val=\"{tam}\"/>")));
+    }
+    s.push_str(&estilo_de_paragrafo("Quote", "Quote", Some("Normal"), "<w:ind w:left=\"440\"/>", "<w:i/><w:color w:val=\"595959\"/>"));
+    s.push_str(&estilo_de_paragrafo("Code", "Code", Some("Normal"), "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"F5F5F5\"/><w:spacing w:after=\"0\" w:line=\"240\" w:lineRule=\"auto\"/>", &format!("{}<w:sz w:val=\"19\"/>", fonte(FONTE_CODIGO))));
+    s.push_str(&estilo_de_paragrafo("ListParagraph", "List Paragraph", Some("Normal"), "<w:spacing w:after=\"40\"/>", ""));
+    s.push_str(&estilo_de_paragrafo("Caption", "caption", Some("Normal"), "", "<w:i/><w:sz w:val=\"18\"/>"));
+    s.push_str(&estilo_de_paragrafo("FDLegendaImagem", "Legenda da imagem", Some("Normal"), "<w:jc w:val=\"center\"/>", "<w:i/><w:sz w:val=\"18\"/>"));
+    s.push_str(&estilo_de_paragrafo("TOCHeading", "TOC Heading", Some("Normal"), "<w:keepNext/><w:spacing w:before=\"240\" w:after=\"120\"/>", "<w:b/><w:sz w:val=\"28\"/>"));
+    s.push_str("<w:style w:type=\"character\" w:styleId=\"Hyperlink\"><w:name w:val=\"Hyperlink\"/><w:rPr><w:color w:val=\"0563C1\"/><w:u w:val=\"single\"/></w:rPr></w:style>");
+    for e in &doc.estilos.lista {
+        s.push_str(&estilo_com_nome_xml(e));
+    }
+    s.push_str("</w:styles>");
+    s
+}
+
+/// Um estilo com nome do usuário (`styleId` `FDEstilo<id>`, para o leitor achar o id de volta).
+fn estilo_com_nome_xml(e: &Estilo) -> String {
+    let base = if e.base == 0 { "Normal".to_string() } else { format!("Heading{}", e.base.clamp(1, 6)) };
+    let mut ppr = espacos(e.antes, e.depois, e.entrelinha);
+    ppr.push_str(&alinhamento(e.alinhamento));
+    let tr = Trecho { estilo: e.bits, fmt: featherdocs_core::modelo::Fmt { tamanho: e.tamanho, cor: e.cor, ..Default::default() }, ..Trecho::default() };
+    let rpr = rpr(&tr);
+    let rpr = rpr.strip_prefix("<w:rPr>").and_then(|r| r.strip_suffix("</w:rPr>")).unwrap_or("");
+    estilo_de_paragrafo(&format!("FDEstilo{}", e.id), &e.nome, Some(&base), &ppr, rpr).replacen("<w:style ", "<w:style w:customStyle=\"1\" ", 1)
+}
+
+fn nivel_de_lista(tipo: usize, nivel: u8) -> String {
+    let (fmt, texto) = TIPOS_DE_LISTA[tipo];
+    let texto = if tipo == 0 { MARCADORES_PADRAO[usize::from(nivel) % 3].to_string() } else { texto.replace("%1", &format!("%{}", nivel + 1)) };
+    let recuo = 720 * (i64::from(nivel) + 1);
+    format!("<w:lvl w:ilvl=\"{nivel}\"><w:start w:val=\"1\"/><w:numFmt w:val=\"{fmt}\"/><w:lvlText w:val=\"{}\"/><w:lvlJc w:val=\"left\"/><w:pPr><w:ind w:left=\"{recuo}\" w:hanging=\"360\"/></w:pPr></w:lvl>", esc(&texto))
+}
+
+fn numeracao_xml(nums: &[Num], titulos: Numeracao) -> String {
+    let mut s = format!("{XML}<w:numbering {NS}>");
+    for tipo in 0..TIPOS_DE_LISTA.len() {
+        let _ = write!(s, "<w:abstractNum w:abstractNumId=\"{tipo}\"><w:multiLevelType w:val=\"hybridMultilevel\"/>");
+        for nivel in 0..9u8 {
+            s.push_str(&nivel_de_lista(tipo, nivel));
+        }
+        s.push_str("</w:abstractNum>");
+    }
+    if titulos != Numeracao::Nenhuma {
+        s.push_str("<w:abstractNum w:abstractNumId=\"100\"><w:multiLevelType w:val=\"multilevel\"/>");
+        for n in 0..6u8 {
+            let mut texto: String = (1..=n + 1).map(|i| format!("%{i}")).collect::<Vec<_>>().join(".");
+            if n == 0 && titulos == Numeracao::Capitulo {
+                texto = "Capítulo %1".into();
+            }
+            let _ = write!(s, "<w:lvl w:ilvl=\"{n}\"><w:start w:val=\"1\"/><w:numFmt w:val=\"decimal\"/><w:pStyle w:val=\"Heading{}\"/><w:suff w:val=\"space\"/><w:lvlText w:val=\"{}\"/><w:lvlJc w:val=\"left\"/></w:lvl>", n + 1, esc(&texto));
+        }
+        s.push_str("</w:abstractNum>");
+    }
+    for (i, n) in nums.iter().enumerate() {
+        let _ = write!(s, "<w:num w:numId=\"{}\"><w:abstractNumId w:val=\"{}\"/>", i + 1, n.tipo);
+        if n.recomeca {
+            s.push_str("<w:lvlOverride w:ilvl=\"0\"><w:startOverride w:val=\"1\"/></w:lvlOverride>");
+        }
+        s.push_str("</w:num>");
+    }
+    if titulos != Numeracao::Nenhuma {
+        let _ = write!(s, "<w:num w:numId=\"{NUM_TITULOS}\"><w:abstractNumId w:val=\"100\"/></w:num>");
+    }
+    s.push_str("</w:numbering>");
+    s
+}
+
+fn configuracoes_xml(doc: &Documento) -> String {
+    let fundo = if doc.extras.cor_pagina != 0 { "<w:displayBackgroundShape/>" } else { "" };
+    let campos = if doc.blocos.iter().any(|b| matches!(b.conteudo, Conteudo::Sumario { .. } | Conteudo::IndiceRemissivo)) { "<w:updateFields w:val=\"true\"/>" } else { "" };
+    let rastrear = if doc.extras.controlar_alteracoes { "<w:trackRevisions/>" } else { "" };
+    let proteger = if doc.extras.protegido { "<w:documentProtection w:edit=\"readOnly\" w:enforcement=\"1\"/>" } else { "" };
+    format!("{XML}<w:settings {NS}>{fundo}{rastrear}{proteger}<w:defaultTabStop w:val=\"708\"/>{campos}<w:compat><w:compatSetting w:name=\"compatibilityMode\" w:uri=\"http://schemas.microsoft.com/office/word\" w:val=\"15\"/></w:compat></w:settings>")
+}
+
+fn propriedades_xml(doc: &Documento) -> String {
+    format!(
+        "{XML}<cp:coreProperties xmlns:cp=\"http://schemas.openxmlformats.org/package/2006/metadata/core-properties\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:dcterms=\"http://purl.org/dc/terms/\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"><dc:title>{}</dc:title><dc:creator>{}</dc:creator></cp:coreProperties>",
+        esc(&doc.meta.titulo),
+        esc(&doc.meta.autor)
+    )
+}
+
+fn raiz_rels() -> String {
+    format!(
+        "{XML}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{REL}/officeDocument\" Target=\"word/document.xml\"/><Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties\" Target=\"docProps/core.xml\"/></Relationships>"
+    )
+}
+
+/// `footnotes.xml` ou `endnotes.xml`: os dois separadores que o Word exige (`w:id` -1 e 0) e as notas.
+fn notas_xml(raiz: &str, notas: &[String]) -> String {
+    let tag = &raiz[..raiz.len() - 1];
+    let mut s = format!("{XML}<w:{raiz} {NS}>");
+    let _ = write!(s, "<w:{tag} w:type=\"separator\" w:id=\"-1\"><w:p><w:r><w:separator/></w:r></w:p></w:{tag}>");
+    let _ = write!(s, "<w:{tag} w:type=\"continuationSeparator\" w:id=\"0\"><w:p><w:r><w:continuationSeparator/></w:r></w:p></w:{tag}>");
+    for n in notas {
+        s.push_str(n);
+    }
+    let _ = write!(s, "</w:{raiz}>");
+    s
+}
+
+/// Um campo complexo (`w:fldChar`) com a instrução e o resultado já calculado.
+fn campo_complexo(instr: &str, resultado: &str) -> String {
+    let fim = "<w:r><w:fldChar w:fldCharType=\"end\"/></w:r>";
+    let comeco = format!("<w:r><w:fldChar w:fldCharType=\"begin\"/></w:r><w:r><w:instrText xml:space=\"preserve\">{}</w:instrText></w:r>", esc(instr));
+    if resultado.is_empty() {
+        format!("{comeco}{fim}")
+    } else {
+        format!("{comeco}<w:r><w:fldChar w:fldCharType=\"separate\"/></w:r><w:r>{}</w:r>{fim}", t(resultado))
+    }
+}
+
+fn tipos_xml(extensoes: &BTreeSet<String>, notas: [bool; 2], fontes: bool, comentarios: bool) -> String {
+    let wml = "application/vnd.openxmlformats-officedocument.wordprocessingml";
+    let mut s = format!("{XML}<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/>");
+    for ext in extensoes {
+        let tipo = if ext == "svg" { "image/svg+xml".to_string() } else { format!("image/{ext}") };
+        let _ = write!(s, "<Default Extension=\"{ext}\" ContentType=\"{tipo}\"/>");
+    }
+    for (parte, tipo) in [("word/document.xml", "document.main"), ("word/styles.xml", "styles"), ("word/numbering.xml", "numbering"), ("word/settings.xml", "settings"), ("word/header1.xml", "header"), ("word/footer1.xml", "footer")] {
+        let _ = write!(s, "<Override PartName=\"/{parte}\" ContentType=\"{wml}.{tipo}+xml\"/>");
+    }
+    for (k, (parte, tipo)) in [("word/footnotes.xml", "footnotes"), ("word/endnotes.xml", "endnotes")].into_iter().enumerate() {
+        if notas[k] {
+            let _ = write!(s, "<Override PartName=\"/{parte}\" ContentType=\"{wml}.{tipo}+xml\"/>");
+        }
+    }
+    if fontes {
+        s.push_str("<Override PartName=\"/customXml/itemProps1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.customXmlProperties+xml\"/>");
+    }
+    if comentarios {
+        let _ = write!(s, "<Override PartName=\"/word/comments.xml\" ContentType=\"{wml}.comments+xml\"/><Override PartName=\"/word/commentsExtended.xml\" ContentType=\"{wml}.commentsExtended+xml\"/>");
+    }
+    s.push_str("<Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/></Types>");
+    s
+}

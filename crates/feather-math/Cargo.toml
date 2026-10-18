@@ -1,0 +1,17 @@
+[package]
+name = "feather-math"
+description = "Composição de fórmulas matemáticas LaTeX (algoritmo do TeX, apêndice G) com a tabela OpenType MATH da Latin Modern Math embutida"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77.2"
+publish = false
+license = "MIT AND LPPL-1.3c"
+
+# Rust puro, sem biblioteca C (regra 7 do CLAUDE.md da raiz). O `ttf-parser` lê a fonte
+# embutida (cmap, métricas, contornos CFF e a tabela MATH); nada de shaping de texto:
+# a composição matemática escolhe glifo por glifo, como o TeX.
+[dependencies]
+ttf-parser = { version = "0.25", default-features = false, features = ["std", "opentype-layout"] }
+
+[lib]
+name = "feather_math"

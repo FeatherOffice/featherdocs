@@ -1,0 +1,28 @@
+[package]
+name = "featherdocs-ponte"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77.2"
+description = "A camada de comandos: o TypeScript pede, o motor no Rust responde."
+
+# O JSON da ponte mora aqui (o `featherdocs-core` não ganha dependência). Este crate
+# também vira `.wasm` para os testes do TypeScript rodarem contra o motor de verdade,
+# por isso leva o `featherdocs-io`: ler/gravar os formatos é Rust puro e compila
+# para WebAssembly; o `src-tauri` só entrega os bytes do arquivo.
+[dependencies]
+featherdocs-core = { path = "../featherdocs-core" }
+featherdocs-io = { path = "../featherdocs-io" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[lib]
+name = "featherdocs_ponte"
+crate-type = ["rlib", "cdylib"]
+
+[profile.release]
+opt-level = "s"
+
+[lints.clippy]
+too_many_lines = "deny"
+cognitive_complexity = "deny"
+
