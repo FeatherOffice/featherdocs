@@ -19,6 +19,43 @@ de versões guardado dentro do próprio arquivo, sem conta e sem nuvem.
 | **Referências** | bibliografia, campos e revisão de texto |
 | **Imagens e gráficos** | efeitos de imagem e gráficos pelo motor comum [`feather-charts`](https://github.com/FeatherOffice/feather-charts) |
 
+## Um interpretador de LaTeX próprio (em construção)
+
+O FeatherDocs **não chama o pdfLaTeX** nem nenhum programa de fora: ele lê o
+`.tex` e compõe a página sozinho, em Rust. Por isso o mesmo documento pode ser
+editado no papel ou no código, lado a lado, e continua sendo LaTeX de verdade.
+
+![O código LaTeX à esquerda e o papel composto pelo FeatherDocs à direita](docs/imagens/latex-codigo-e-papel.png)
+
+A mesma página ([`docs/exemplos/vitrine.tex`](docs/exemplos/vitrine.tex)) no
+pdfLaTeX e no FeatherDocs:
+
+![A mesma página no pdfLaTeX e no FeatherDocs](docs/imagens/latex-lado-a-lado.png)
+
+O que já entra na composição:
+
+- quebra de parágrafo do TeX (Knuth-Plass, com as mesmas penalidades e o espaço
+  maior depois do ponto) e hifenização do português;
+- fórmulas (`amsmath`) pelo [`feather-math`](crates/feather-math), com a Latin Modern Math;
+- tabelas com `booktabs`, `\multicolumn`, `\multirow`, `\rowcolors` e `longtable`;
+- `tcolorbox`, `xcolor`, desenhos simples em TikZ (nós, setas, retângulos, círculos);
+- seções, listas, legendas numeradas, sumário, bibliografia (ABNT, APA, IEEE…), notas;
+- classes e pacotes comuns (`article`, `exam`, `geometry`, `helvet`, `babel`).
+
+**Ainda não funciona, ou funciona pela metade** (é uma versão inicial):
+
+- kerning: as linhas saem cerca de 0,5% mais largas que no LaTeX e às vezes
+  quebram em outro lugar;
+- TikZ com curvas, `\foreach` e `pgfplots`; o texto dos nós sai com serifa;
+- `minipage` lado a lado e `multicols` (os blocos ficam um embaixo do outro);
+- espaços dentro do `tcolorbox` um pouco maiores que no LaTeX;
+- citações `\textcite` e "et al.", o logo `\LaTeX`;
+- recursos só do LuaLaTeX/XeLaTeX (o leitor segue o caminho do pdfLaTeX).
+
+Nos modelos de teste, cerca de **68% das linhas** já quebram exatamente no mesmo
+lugar que no pdfLaTeX. O que o leitor não entende aparece na aba **Avisos**, com
+a linha do código.
+
 O que falta para o uso diário: [`docs/PARIDADE-USO.md`](docs/PARIDADE-USO.md).
 Correções da auditoria de 18/10: [`docs/PLANO-CORRECOES.md`](docs/PLANO-CORRECOES.md).
 Plano das funções ainda marcadas "Em breve": [`docs/PLANO-EM-BREVE.md`](docs/PLANO-EM-BREVE.md).

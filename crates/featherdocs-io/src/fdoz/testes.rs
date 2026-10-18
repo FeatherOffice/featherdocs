@@ -94,6 +94,7 @@ fn pagina_estilos_e_marcadores_sobrevivem_ao_arquivo() {
         controlar_alteracoes: false,
         protegido: false,
         composicao_tex: true,
+        pagina_inicial: 0,
     };
     d.estilos.numeracao = Numeracao::Capitulo;
     d.estilos.lista.push(Estilo { id: 1, nome: "Capa".into(), base: 1, bits: NEGRITO, tamanho: 30.0, cor: 0x3366_99ff, alinhamento: Alinhamento::Centro, antes: Some(0.0), depois: None, entrelinha: 1.0 });

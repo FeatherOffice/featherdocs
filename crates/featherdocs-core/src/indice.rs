@@ -47,7 +47,7 @@ impl Sessao {
                 let mut pos = 0;
                 for tr in t {
                     if let Some(Marca::Indice { termo, sub }) = tr.marca.as_deref() {
-                        let pagina = if tabela { self.pagina_do_bloco(b.id).map_or(1, |p| p + 1) } else { self.pagina_do_caractere(i, pos) };
+                        let pagina = if tabela { self.numero_da_pagina(self.pagina_do_bloco(b.id).unwrap_or(0)) } else { self.pagina_do_caractere(i, pos) };
                         match v.iter_mut().find(|e| &e.termo == termo && &e.sub == sub) {
                             Some(e) if !e.paginas.contains(&pagina) => e.paginas.push(pagina),
                             Some(_) => {}

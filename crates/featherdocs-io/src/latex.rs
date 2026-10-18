@@ -255,6 +255,8 @@ fn ler_texto(fonte: &str, coletor: &avisos::Coletor, arquivos: Option<projeto::A
     if corpo_expandido.trim_start().starts_with("\\begin{titlepage}") {
         let x = &mut doc.extras;
         (x.cabecalho_primeira, x.rodape_primeira, x.primeira_diferente) = (Faixas::default(), Faixas::default(), true);
+        // E não conta: o `titlepage` volta o contador, a página seguinte é a 1.
+        x.pagina_inicial = 0;
     }
     extras_da_pagina(&mut doc, preambulo, corpo, &cores);
     let (itemsep, cor_marcador) = listas_do_preambulo(preambulo, &cores, classe);
@@ -1998,17 +2000,22 @@ struct Inline<'a> {
 }
 
 impl Inline<'_> {
-    fn texto(&mut self, t: &str, extra: u8) {
-        if t.is_empty() {
-            return;
-        }
-        let estilo = (self.e.estilo & !SERIFA) | self.e.familia.unwrap_or(self.ctx.classe.familia) | extra;
+    /// A cor, o tamanho e a posição do que sai agora com o `estilo`.
+    fn fmt(&self, estilo: u8) -> Fmt {
         let mut tamanho = if self.e.tamanho > 0.0 { self.e.tamanho } else { self.ctx.classe.corpo };
         // A monoespaçada vai na mesma escala (o `\setmonofont[Scale=…]` do mesmo preâmbulo).
         if self.ctx.classe.escala != 1.0 && estilo & SERIFA == 0 {
             tamanho = if tamanho > 0.0 { tamanho } else { self.ctx.classe.tamanhos[4] } * self.ctx.classe.escala;
         }
-        let fmt = Fmt { cor: self.e.cor, tamanho, realce: self.e.realce, posicao: self.e.posicao };
+        Fmt { cor: self.e.cor, tamanho, realce: self.e.realce, posicao: self.e.posicao }
+    }
+
+    fn texto(&mut self, t: &str, extra: u8) {
+        if t.is_empty() {
+            return;
+        }
+        let estilo = (self.e.estilo & !SERIFA) | self.e.familia.unwrap_or(self.ctx.classe.familia) | extra;
+        let fmt = self.fmt(estilo);
         if let Some(u) = self.saida.last_mut() {
             if u.marca.is_none() && u.estilo == estilo && u.link == self.link && u.fmt == fmt {
                 u.texto.push_str(t);
@@ -2290,7 +2297,9 @@ impl Inline<'_> {
         let (chaves, g) = grupo(&depois[k..])?;
         let pagina = pagina.trim().trim_start_matches("pp.").trim_start_matches("p.").trim_start_matches('~').trim().replace('~', " ");
         let chaves = chaves.split(',').map(str::trim).filter(|c| !c.is_empty()).map(str::to_string).collect();
-        self.saida.push(Trecho { estilo: self.e.estilo | self.ctx.classe.familia, ..Trecho::objeto(Marca::Citacao { chaves, pagina }) });
+        let estilo = self.e.estilo | self.ctx.classe.familia;
+        // Na letra do texto em volta (sem isto a citação sai no corpo padrão, fora da escala da letra).
+        self.saida.push(Trecho { estilo, fmt: self.fmt(estilo), ..Trecho::objeto(Marca::Citacao { chaves, pagina }) });
         Some(k + g)
     }
 
@@ -4293,7 +4302,12 @@ impl Analisador<'_> {
         if em_cima && !legenda.is_empty() {
             self.push_legenda(std::mem::take(&mut legenda), 1);
         }
+        let numerada = !legenda.is_empty();
         self.push_bloco(Conteudo::Imagem { origem, legenda, largura, altura: 0.0 });
+        // A legenda embaixo (o padrão do LaTeX) também é numerada: "Figura 1: …", com o separador da classe.
+        if let Some(b) = self.saida.last_mut().filter(|_| numerada) {
+            b.latex = self.ctx.separador_legenda.to_string();
+        }
         let mut r = corpo;
         while let Some(p) = r.find("\\label") {
             r = &r[p + "\\label".len()..];
@@ -4328,14 +4342,16 @@ impl Analisador<'_> {
         while let Some((_, k)) = opcional(corpo) {
             corpo = &corpo[k..];
         }
+        // `{largura}{colunas}` (tabular*, tabularx) ou só `{colunas}`: um `{` depois das colunas já é a
+        // primeira célula (`{\Huge 4} & …`), não outro argumento.
         let mut colunas = "";
-        while let Some((g, k)) = grupo(corpo) {
-            if colunas.is_empty() {
-                colunas = g;
-            }
+        if let Some((g, k)) = grupo(corpo) {
+            colunas = g;
             corpo = &corpo[k..];
-            if !corpo.trim_start().starts_with('{') {
-                break;
+            let largura = g.trim_start().starts_with(|c: char| c.is_ascii_digit() || c == '.' || c == '\\');
+            if let Some((c, k)) = grupo(corpo).filter(|_| largura) {
+                colunas = c;
+                corpo = &corpo[k..];
             }
         }
         // A legenda da `longtable` é a primeira "linha": `\caption{…}\label{…}\\`.
@@ -4552,6 +4568,14 @@ mod testes {
         let Conteudo::Tabela { cabecalho, linhas } = &d.blocos[3].conteudo else { panic!() };
         assert!(*cabecalho);
         assert_eq!(linhas.len(), 2);
+    }
+
+    #[test]
+    fn tabular_com_grupo_na_primeira_celula_nao_perde_a_celula() {
+        let d = ler("\\begin{tabular}{cc}{\\Huge 4} & {\\Huge 41} \\\\ a & b \\\\\\end{tabular}");
+        let Conteudo::Tabela { linhas, .. } = &d.blocos[0].conteudo else { panic!("{:?}", d.blocos[0].conteudo) };
+        assert_eq!(texto_puro(&linhas[0][0]), "4");
+        assert_eq!(d.blocos[0].latex.lines().next(), Some("cc"));
     }
 
     #[test]

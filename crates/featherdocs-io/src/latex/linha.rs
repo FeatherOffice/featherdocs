@@ -97,6 +97,7 @@ impl Inline<'_> {
     }
 
     fn campo(&mut self, campo: &str) {
-        self.saida.push(Trecho { estilo: self.e.estilo | self.ctx.classe.familia, ..Trecho::objeto(Marca::Campo { campo: campo.into() }) });
+        let estilo = self.e.estilo | self.ctx.classe.familia;
+        self.saida.push(Trecho { estilo, fmt: self.fmt(estilo), ..Trecho::objeto(Marca::Campo { campo: campo.into() }) });
     }
 }

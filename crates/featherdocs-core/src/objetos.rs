@@ -137,7 +137,7 @@ impl Sessao {
     /// Depois de paginar: o campo `pagina` mostra a página onde está, e `paginas` o total.
     /// `true` se algum mudou (então é preciso compor de novo).
     pub(crate) fn rotular_paginas(&mut self) -> bool {
-        let total = self.paginas.len().to_string();
+        let total = self.numero_da_pagina(self.paginas.len().saturating_sub(1)).to_string();
         let mut trocas = Vec::new();
         for (i, b) in self.doc.blocos.iter().enumerate() {
             for (k, t) in b.conteudo.textos().into_iter().enumerate() {
@@ -167,7 +167,7 @@ impl Sessao {
     /// A página (1, 2…) onde está o caractere `desl` do texto corrido do bloco `i`.
     pub(crate) fn pagina_do_caractere(&self, i: usize, desl: usize) -> usize {
         let li = if i < self.layouts.len() { self.linha_do_desl(i, desl) } else { 0 };
-        self.fatias_do_bloco(i).into_iter().find(|(_, f)| li >= f.de && li < f.ate).map_or(1, |(p, _)| p + 1)
+        self.fatias_do_bloco(i).into_iter().find(|(_, f)| li >= f.de && li < f.ate).map_or(self.numero_da_pagina(0), |(p, _)| self.numero_da_pagina(p))
     }
 
     /// Formatação das notas: o formato do número das de rodapé e das de fim.

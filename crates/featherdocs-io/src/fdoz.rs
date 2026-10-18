@@ -218,6 +218,7 @@ fn documento_arrow(doc: &Documento) -> Result<Vec<u8>, String> {
             ("controlar_alteracoes", Arc::new(BooleanArray::from(vec![x.controlar_alteracoes]))),
             ("protegido", Arc::new(BooleanArray::from(vec![x.protegido]))),
             ("composicao_tex", Arc::new(BooleanArray::from(vec![x.composicao_tex]))),
+            ("pagina_inicial", Arc::new(UInt32Array::from(vec![x.pagina_inicial]))),
             ("sem_sl_sn", Arc::new(BooleanArray::from(vec![doc.bibliografia.sem_sl_sn]))),
         ],
         meta,
@@ -750,6 +751,7 @@ fn ler_documento(t: &Lida) -> Result<Documento, String> {
         controlar_alteracoes: t.col::<BooleanArray>("controlar_alteracoes").is_ok_and(|a| a.value(0)),
         protegido: t.col::<BooleanArray>("protegido").is_ok_and(|a| a.value(0)),
         composicao_tex: t.col::<BooleanArray>("composicao_tex").is_ok_and(|a| a.value(0)),
+        pagina_inicial: u("pagina_inicial").unwrap_or(1),
     };
     let mut doc = Documento::vazio();
     doc.meta = Meta { titulo: s("titulo")?, autor: s("autor")? };

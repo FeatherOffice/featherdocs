@@ -173,8 +173,10 @@ pub fn numeros<S: AsRef<str>>(blocos: &[Bloco], numeracao: Numeracao, capitulo: 
                 equacoes += n;
                 return Some((equacoes - n + 1).to_string());
             }
-            if (1..=3).contains(&b.atrib.legenda) && matches!(b.conteudo, Conteudo::Paragrafo { .. }) {
-                let k = usize::from(b.atrib.legenda - 1);
+            // A imagem do LaTeX com a legenda embaixo dela ("Figura 1: …") conta como figura.
+            let imagem_numerada = matches!(&b.conteudo, Conteudo::Imagem { legenda, .. } if !legenda.is_empty()) && matches!(b.latex.as_str(), ":" | ".");
+            if imagem_numerada || (1..=3).contains(&b.atrib.legenda) && matches!(b.conteudo, Conteudo::Paragrafo { .. }) {
+                let k = if imagem_numerada { 0 } else { usize::from(b.atrib.legenda - 1) };
                 legendas[k] += 1;
                 let separador = if matches!(b.latex.as_str(), ":" | ".") { b.latex.as_str() } else { " –" };
                 return Some(format!("{} {}{separador}", rotulos.get(k).map_or("", AsRef::as_ref), legendas[k]));
@@ -468,6 +470,7 @@ pub fn paginar(layouts: &[Arc<LayoutBloco>], marcadores: &[Option<String>], altu
 mod testes {
     use super::*;
     use crate::layout::Linha;
+    use crate::modelo::Trecho;
 
     fn bloco(n: usize, h: f32) -> Arc<LayoutBloco> {
         let linhas = (0..n).map(|_| Linha { altura: h, ..Linha::default() }).collect();
@@ -477,6 +480,19 @@ mod testes {
     fn rodar(blocos: Vec<Arc<LayoutBloco>>, altura: f32) -> Vec<Pagina> {
         let m = vec![None; blocos.len()];
         paginar(&blocos, &m, altura)
+    }
+
+    #[test]
+    fn imagem_do_latex_com_legenda_conta_como_figura() {
+        let img = |latex: &str| Bloco {
+            id: 0,
+            conteudo: Conteudo::Imagem { origem: "a.png".into(), legenda: vec![Trecho::simples("Logo")], largura: 0.0, altura: 0.0 },
+            atrib: Atrib::default(),
+            mesclagens: Vec::new(),
+            latex: latex.into(),
+        };
+        let n = numeros_dos_titulos(&[img(":"), img("")], Numeracao::Nenhuma, "");
+        assert_eq!(n, vec![Some("Figura 1:".to_string()), None]);
     }
 
     #[test]

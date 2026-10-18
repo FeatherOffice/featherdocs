@@ -1,0 +1,105 @@
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[brazilian]{babel}
+\usepackage[a4paper,margin=1.4cm]{geometry}
+\usepackage[scaled=.92]{helvet}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage[table]{xcolor}
+\usepackage{tikz}
+\usepackage{tcolorbox}
+\tcbuselibrary{skins}
+
+\definecolor{pena}{HTML}{2F6FDE}
+\definecolor{folha}{HTML}{2E9E6A}
+\definecolor{brasa}{HTML}{E0663A}
+\definecolor{tinta}{HTML}{1F2937}
+\definecolor{nevoa}{HTML}{6B7280}
+
+\pagestyle{empty}
+
+\begin{document}
+
+\begin{tcolorbox}[colback=pena, colframe=pena, sharp corners]
+  \color{white}
+  {\LARGE\bfseries Observatório do Rio Claro}
+
+  {\large Boletim de qualidade da água --- 3º trimestre de 2026}
+
+  {\small Laboratório de Hidrologia \quad$\cdot$\quad 18 de outubro de 2026}
+\end{tcolorbox}
+\medskip
+
+\begin{center}
+\begin{tabular}{cccc}
+  {\Huge\bfseries\color{pena} 4} & {\Huge\bfseries\color{brasa} $-$18\%} & {\Huge\bfseries\color{folha} 6,3} & {\Huge\bfseries\color{tinta} 41} \\
+  {\small\color{nevoa} pontos de coleta} & {\small\color{nevoa} vazão média} & {\small\color{nevoa} menor O$_2$ (mg/L)} & {\small\color{nevoa} maior turbidez (NTU)} \\
+\end{tabular}
+\end{center}
+
+\section{Resumo}
+
+Este boletim reúne as medições feitas em quatro pontos do \textbf{Rio Claro} entre julho e setembro.
+A vazão média caiu \textcolor{brasa}{\textbf{18\%}} em relação ao trimestre anterior, efeito direto
+da estiagem, enquanto o oxigênio dissolvido se manteve dentro do limite da \emph{classe~2} em todos
+os pontos. A turbidez subiu no trecho urbano, onde a concentração de sedimentos acompanha as obras
+de drenagem iniciadas em agosto.
+
+\section{Medições por ponto}
+
+\begin{center}
+\rowcolors{2}{white}{pena!6}
+\begin{tabular}{lrrr}
+  \toprule
+  \textbf{Ponto} & \textbf{Vazão (m$^3$/s)} & \textbf{O$_2$ (mg/L)} & \textbf{Turbidez (NTU)} \\
+  \midrule
+  P1 --- Nascente    & 2,4 & 8,1 & 3  \\
+  P2 --- Ponte Velha & 5,7 & 7,4 & 12 \\
+  P3 --- Centro      & 6,2 & 6,3 & \textcolor{brasa}{\textbf{41}} \\
+  P4 --- Foz         & 7,9 & 6,8 & 27 \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\begin{center}
+\begin{tikzpicture}[x=1.1cm, y=0.026cm]
+  \draw[dashed, gray] (0,25) -- (8.8,25);
+  \draw[dashed, gray] (0,50) -- (8.8,50);
+  \draw[dashed, gray] (0,75) -- (8.8,75);
+  \node at (-0.4,25) {2,5}; \node at (-0.4,50) {5,0}; \node at (-0.4,75) {7,5};
+  \draw[fill=pena, draw=pena]  (0.6,0) rectangle (1.8,24); \node at (1.2,31) {\textbf{2,4}};
+  \draw[fill=pena, draw=pena]  (2.6,0) rectangle (3.8,57); \node at (3.2,64) {\textbf{5,7}};
+  \draw[fill=brasa, draw=brasa] (4.6,0) rectangle (5.8,62); \node at (5.2,69) {\textbf{6,2}};
+  \draw[fill=folha, draw=folha] (6.6,0) rectangle (7.8,79); \node at (7.2,86) {\textbf{7,9}};
+  \draw[thick] (0,0) -- (8.8,0);
+  \node at (1.2,-8) {P1}; \node at (3.2,-8) {P2}; \node at (5.2,-8) {P3}; \node at (7.2,-8) {P4};
+\end{tikzpicture}\\[2pt]
+{\small\color{nevoa} Vazão média de cada ponto (m$^3$/s).}
+\end{center}
+
+\section{Modelo de vazão}
+
+A vazão $Q$ em cada seção vem da fórmula de Manning, com a área molhada $A$, o raio hidráulico $R$,
+a declividade $S$ e a rugosidade $n$; a carga de sedimentos $M$ é a integral da vazão pela concentração $C$:
+\begin{equation}
+  Q = \frac{1}{n}\, A\, R^{2/3} \sqrt{S}
+  \qquad\qquad
+  M = \int_{t_0}^{t_1} Q(t)\, C(t)\, \mathrm{d}t \approx \sum_{k=1}^{N} Q_k\, C_k\, \Delta t
+\end{equation}
+
+\begin{tcolorbox}[colback=brasa!8, colframe=brasa, title=Destaque do trimestre, fonttitle=\bfseries]
+  O ponto P3 passou de 25 para \textbf{41 NTU}. A equipe recomenda uma nova coleta em novembro,
+  depois do fim das obras, para separar o efeito da estiagem do efeito da drenagem.
+\end{tcolorbox}
+
+\section{Próximos passos}
+
+\begin{enumerate}
+  \item Instalar o sensor contínuo de turbidez no ponto P3.
+  \item Comparar a série de 2026 com a média dos últimos dez anos.
+  \item Publicar os dados abertos no portal do município.
+\end{enumerate}
+
+\end{document}

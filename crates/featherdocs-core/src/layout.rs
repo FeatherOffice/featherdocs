@@ -599,6 +599,16 @@ fn largura_visivel(fichas: &[Ficha]) -> f32 {
 }
 
 /// A entrelinha de um parágrafo como múltiplo do padrão (1,15).
+/// A altura da linha em pontos inteiros; no documento do LaTeX, a exata (o `\baselineskip` de 13,6 pt
+/// do corpo 11 vira 14 arredondado, e a diferença soma uma linha a cada 35).
+fn altura_da_linha(h: f32) -> f32 {
+    if COMPOSICAO_TEX.with(|c| c.get()) {
+        h
+    } else {
+        h.round()
+    }
+}
+
 fn fator_entrelinha(a: &Atrib) -> f32 {
     if a.entrelinha > 0.0 {
         a.entrelinha / 1.15
@@ -643,7 +653,7 @@ fn texto_formatado(trechos: &[Trecho], b: &Base, a: &Atrib) -> Vec<Linha> {
                 Alinhamento::Justificado => (inicio, (!ultima || visivel > disponivel).then_some(disponivel - visivel)),
             };
             let tam = corpo_da_linha(&f, b.tamanho);
-            let mut altura = (tam * ENTRELINHA * fator).round();
+            let mut altura = altura_da_linha(tam * ENTRELINHA * fator);
             let mut base = linha_de_base(altura, tam);
             let mut pedacos = pedacos_da_linha(f, x_ini, base, ultima, justificar, inicio + disponivel);
             if b.usar_tamanho {
@@ -745,7 +755,7 @@ const FOLGA_DO_FUNDO: f32 = 4.0;
 
 /// A linha de um parágrafo sem texto: o cursor fica onde o alinhamento manda.
 fn linha_vazia(b: &Base, a: &Atrib, inicio: f32, disponivel: f32) -> Linha {
-    let altura = (b.tamanho * ENTRELINHA * fator_entrelinha(a)).round();
+    let altura = altura_da_linha(b.tamanho * ENTRELINHA * fator_entrelinha(a));
     let x0 = match a.alinhamento {
         Alinhamento::Centro => inicio + disponivel / 2.0,
         Alinhamento::Direita => inicio + disponivel,
@@ -1089,7 +1099,7 @@ fn celulas_da_linha(linha: &[Vec<Trecho>], colunas: usize, largura_col: f32, cab
         texto_celula(linha.get(c).map_or(&[][..], Vec::as_slice), tam, extra, largura - 10.0, pagina, false)
     }).collect();
     let linhas_max = compostas.iter().map(Vec::len).max().unwrap_or(1);
-    let altura = (tam * ENTRELINHA * estica).round();
+    let altura = altura_da_linha(tam * ENTRELINHA * estica);
     let total = altura * linhas_max as f32 + 8.0;
     let mut saida = Linha { altura: total, ..Linha::default() };
     let base = 4.0 + linha_de_base(altura, tam);
@@ -1316,9 +1326,13 @@ pub fn tabela_latex(linhas: &[Vec<Celula>], regua: &str, limite: f32, mesclagens
     for (i, l) in compostas.into_iter().enumerate() {
         let mut linha = Linha::default();
         let topo = divisa(i, 0.0, &mut linha.deco);
-        let base = topo + 0.7 * altura;
+        // A letra maior que a do `\strut` (`{\Huge 41}`) empurra a linha para baixo: o TeX soma a altura
+        // da caixa mais alta da primeira linha (uns 0,72 em acima da base), não só a do `\strut`.
+        let maior = l.iter().filter_map(|(ls, _)| ls.first()).flat_map(|l| &l.pedacos).map(|p| p.tamanho).fold(0.0, f32::max);
+        let a_mais = (0.72 * maior - 0.7 * altura).max(0.0);
+        let base = topo + 0.7 * altura + a_mais;
         // A coluna `p` quebra o texto: a linha da tabela cresce de uma linha de texto por vez.
-        let alta = altura * l.iter().map(|(ls, _)| ls.len()).max().unwrap_or(1).max(1) as f32;
+        let alta = altura * l.iter().map(|(ls, _)| ls.len()).max().unwrap_or(1).max(1) as f32 + a_mais;
         if fundo(i) != 0 {
             linha.deco.insert(0, Deco::Retangulo { x: x0, y: topo, w: total, h: alta, cor: fundo(i) });
         }
@@ -1396,7 +1410,7 @@ fn indivisivel(linha: Linha, antes: f32, depois: f32) -> LayoutBloco {
     LayoutBloco { linhas: vec![linha], antes, depois, minimo_antes: 1, minimo_depois: 0, ..LayoutBloco::default() }
 }
 
-fn imagem(origem: &str, legenda: &[Trecho], w: f32, h: f32, limite: f32) -> LayoutBloco {
+fn imagem(origem: &str, legenda: &[Trecho], w: f32, h: f32, limite: f32, numero: Option<&str>) -> LayoutBloco {
     let (mut w, mut h) = if w > 0.0 && h > 0.0 { (w, h) } else { (limite * 0.7, limite * 0.5) };
     let escala = (limite / w).min(520.0 / h).min(1.0);
     w *= escala;
@@ -1404,7 +1418,16 @@ fn imagem(origem: &str, legenda: &[Trecho], w: f32, h: f32, limite: f32) -> Layo
     let deco = vec![Deco::Imagem { x: (limite - w) / 2.0, y: 0.0, w, h, origem: origem.to_string() }];
     let mut bloco = indivisivel(Linha { altura: h, deco, ..Linha::default() }, 6.0, 4.0);
     if !legenda.is_empty() {
-        let mut texto = texto_corrido(legenda, 9.5, ITALICO, COR_CITACAO, 0.0, limite);
+        // A do LaTeX ("Figura 1: …") sai como o `\caption`: o número na frente, na letra e no tamanho do texto.
+        let mut texto = match numero {
+            Some(n) => {
+                let estilo = legenda.first().map_or(0, |t| t.estilo);
+                let mut com_numero = vec![Trecho { estilo, ..Trecho::simples(&format!("{n} ")) }];
+                com_numero.extend_from_slice(legenda);
+                texto_corrido(&com_numero, CORPO, 0, COR_TEXTO, 0.0, limite)
+            }
+            None => texto_corrido(legenda, 9.5, ITALICO, COR_CITACAO, 0.0, limite),
+        };
         // A linha inteira no meio (cada pedaço sozinho no meio encavalaria "(a) " e o resto).
         for l in &mut texto {
             let fim = l.pedacos.iter().map(|p| p.x + largura(&p.texto, p.estilo, p.tamanho)).fold(0.0, f32::max);
@@ -1691,7 +1714,7 @@ fn compor_bloco(c: &Conteudo, a: &Atrib, limite: f32, en: &Entorno, mesclagens: 
         Conteudo::Citacao { texto } => citacao(texto, limite, a),
         Conteudo::Codigo { codigo: fonte, .. } => codigo(fonte, limite),
         Conteudo::Tabela { cabecalho, linhas } => tabela(*cabecalho, linhas, limite, mesclagens, a),
-        Conteudo::Imagem { origem, legenda, largura, altura } => imagem(origem, legenda, *largura, *altura, limite),
+        Conteudo::Imagem { origem, legenda, largura, altura } => imagem(origem, legenda, *largura, *altura, limite, en.numero),
         Conteudo::Equacao { latex } => equacao(latex, limite, en.numero),
         Conteudo::Regua => regua(limite, a),
         Conteudo::QuebraDePagina => quebra_de_pagina(limite),
@@ -1865,6 +1888,10 @@ mod testes {
         assert_eq!(colunas_latex("p{3cm}l").1, vec![Some(3.0 * 28.3465), None]);
         let t = tabela_latex(&[vec![c("palavra palavra palavra palavra palavra"), c("x")]], "p{2cm}l\n;", 400.0, &[], &Atrib::default());
         assert!(t.linhas[0].pedacos.iter().map(|p| p.y).fold(0.0, f32::max) > 13.6);
+        // `{\Huge 41}`: a linha cresce para a letra caber acima da base, sem invadir o que vem antes.
+        let grande = vec![Trecho { fmt: crate::modelo::Fmt { tamanho: 24.88, ..Default::default() }, ..Trecho::simples("41") }];
+        let t = tabela_latex(&[vec![grande, c("x")]], "cc\n;", 400.0, &[], &Atrib::default());
+        assert!(t.linhas[0].pedacos[0].y >= 0.72 * 24.88 && t.linhas[0].altura > 0.72 * 24.88 + 4.0, "{}", t.linhas[0].altura);
     }
 
     #[test]

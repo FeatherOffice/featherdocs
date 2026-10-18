@@ -268,7 +268,7 @@ impl Sessao {
     /// Pontilhado e número da página, alinhado à direita da área útil.
     fn numero_do_sumario(&self, e: &mut Escritor, l: &Linha, alvo: u64, x0: f32, y0: f32) {
         let (Some(p), Some(ultimo)) = (l.pedacos.first(), l.pedacos.last()) else { return };
-        let numero = self.pagina_do_bloco(alvo).map_or("?".to_string(), |n| (n + 1).to_string());
+        let numero = self.pagina_do_bloco(alvo).map_or("?".to_string(), |n| self.numero_da_pagina(n).to_string());
         let direita = x0 + self.doc.pagina.largura_util();
         let w_num = largura(&numero, p.estilo, p.tamanho);
         let fim_texto = x0 + ultimo.x + largura(&ultimo.texto, ultimo.estilo, ultimo.tamanho);
@@ -350,9 +350,9 @@ impl Sessao {
     /// Troca `{pagina}`, `{total}`, `{pagina_romano}`, `{titulo}` e `{autor}` pelos valores desta página.
     pub fn resolver_campos(&self, texto: &str, pagina: usize) -> String {
         texto
-            .replace("{pagina_romano}", &crate::paginacao::romano(pagina as u32 + 1).to_lowercase())
-            .replace("{pagina}", &(pagina + 1).to_string())
-            .replace("{total}", &self.paginas.len().to_string())
+            .replace("{pagina_romano}", &crate::paginacao::romano(self.numero_da_pagina(pagina) as u32).to_lowercase())
+            .replace("{pagina}", &self.numero_da_pagina(pagina).to_string())
+            .replace("{total}", &self.numero_da_pagina(self.paginas.len().saturating_sub(1)).to_string())
             .replace("{titulo}", &self.doc.meta.titulo)
             .replace("{autor}", &self.doc.meta.autor)
     }

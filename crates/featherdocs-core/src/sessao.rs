@@ -426,6 +426,11 @@ impl Sessao {
         self.titulo_na_pagina.get(&id).copied()
     }
 
+    /// O número que a página `p` (0, 1…) mostra: conta a partir de `Extras::pagina_inicial`.
+    pub fn numero_da_pagina(&self, p: usize) -> usize {
+        p + self.doc.extras.pagina_inicial as usize
+    }
+
     /// Quantas páginas.
     pub fn total_de_paginas(&self) -> usize {
         self.paginas.len()

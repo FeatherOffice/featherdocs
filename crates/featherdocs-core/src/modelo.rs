@@ -529,6 +529,14 @@ pub struct Extras {
     /// espaço maior depois do ponto). O de outra origem quebra linha a linha, como o Word.
     #[serde(default)]
     pub composicao_tex: bool,
+    /// O número da primeira página (Layout → Número de página → Iniciar em). O `titlepage` do LaTeX
+    /// dá 0: a capa não conta e a página seguinte é a 1.
+    #[serde(default = "um")]
+    pub pagina_inicial: u32,
+}
+
+fn um() -> u32 {
+    1
 }
 
 fn dois() -> u8 {
@@ -559,7 +567,7 @@ pub enum NumeracaoDeLinhas {
 
 impl Default for Extras {
     fn default() -> Self {
-        Self { cabecalho: Faixas::default(), rodape: rodape_padrao(), primeira_diferente: false, cabecalho_primeira: Faixas::default(), rodape_primeira: Faixas::default(), cor_pagina: 0, marca: String::new(), marca_cor: 0, borda_cor: 0, borda_espessura: 0.0, borda_distancia: 0.0, vertical: Vertical::Topo, numerar_linhas: NumeracaoDeLinhas::Nenhuma, formato_notas: 0, formato_notas_fim: 2, controlar_alteracoes: false, protegido: false, composicao_tex: false }
+        Self { cabecalho: Faixas::default(), rodape: rodape_padrao(), primeira_diferente: false, cabecalho_primeira: Faixas::default(), rodape_primeira: Faixas::default(), cor_pagina: 0, marca: String::new(), marca_cor: 0, borda_cor: 0, borda_espessura: 0.0, borda_distancia: 0.0, vertical: Vertical::Topo, numerar_linhas: NumeracaoDeLinhas::Nenhuma, formato_notas: 0, formato_notas_fim: 2, controlar_alteracoes: false, protegido: false, composicao_tex: false, pagina_inicial: 1 }
     }
 }
 

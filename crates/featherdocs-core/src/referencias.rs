@@ -84,7 +84,7 @@ impl Sessao {
 
     /// Tudo o que a caixa de referência cruzada oferece: títulos, legendas e marcadores, na ordem do documento.
     pub fn alvos_de_referencia(&self) -> Vec<AlvoDeReferencia> {
-        let pagina = |id: u64| self.pagina_do_bloco(id).map_or(0, |p| p + 1);
+        let pagina = |id: u64| self.pagina_do_bloco(id).map_or(0, |p| self.numero_da_pagina(p));
         let mut v: Vec<AlvoDeReferencia> = Vec::new();
         for (i, b) in self.doc.blocos.iter().enumerate() {
             let tipo = match (&b.conteudo, b.atrib.legenda) {
@@ -108,7 +108,7 @@ impl Sessao {
     fn texto_da_referencia(&self, id: u64, modo: &str) -> Option<String> {
         let i = self.idx(id)?;
         Some(match modo {
-            "pagina" => (self.pagina_do_bloco(id)? + 1).to_string(),
+            "pagina" => self.numero_da_pagina(self.pagina_do_bloco(id)?).to_string(),
             "numero" => {
                 let n = self.numero_do_bloco(i);
                 if n.is_empty() {
