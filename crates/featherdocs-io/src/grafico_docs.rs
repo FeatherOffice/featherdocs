@@ -268,7 +268,7 @@ pub fn atualizar_no_cursor(sessao: &mut Sessao) -> Result<Mudanca, String> {
         return Err("Selecione o gráfico embutido para atualizar.".into());
     };
     let vinculo = vinculo_da_imagem(origem)
-        .ok_or("A imagem não é um gráfico editável do FeatherOffice.")?;
+        .ok_or("A imagem não é um gráfico editável do FeatherWorks.")?;
     let nova_origem = renderizar(sessao.documento(), &vinculo)?;
     sessao.imagem_origem_atualizar(id, &nova_origem)
 }

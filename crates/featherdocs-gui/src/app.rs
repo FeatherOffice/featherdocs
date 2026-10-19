@@ -2985,7 +2985,7 @@ impl App {
             ].spacing(12).into(),
             _ => column![
                 text(tr("FeatherDocs")).size(22),
-                text(tr("Editor de documentos da suíte FeatherOffice, nativo em Rust/Iced.")),
+                text(tr("Editor de documentos da suíte FeatherWorks, nativo em Rust/Iced.")),
                 text(tr("Arquivos e operações são locais. Não há conta, telemetria ou envio automático de conteúdo.")),
                 text(tr("Tema, botões, menus e configurações vêm da biblioteca feather-ui.")),
             ].spacing(12).into(),

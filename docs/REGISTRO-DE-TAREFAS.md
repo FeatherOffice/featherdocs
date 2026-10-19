@@ -3,7 +3,7 @@
 > Era o README de `featherdocs/` enquanto o produto morava no repositório de desenvolvimento da suíte (até 15/10/2026). Fica como histórico das entregas e validações; links para `featheroffice/` e outros produtos apontam para pastas que não existem neste repositório.
 
 
-> **Produto independente — repositório planejado:** `FeatherOffice/featherdocs`.
+> **Produto independente — repositório planejado:** `feather-works/featherdocs`.
 > O projeto ainda está nesta pasta do repositório de desenvolvimento; a separação Git não foi realizada.
 
 **Documentos:** formatos `.fdoz`, `.docx`, `.tex` e `.md`; desenvolvimento e versões próprios.

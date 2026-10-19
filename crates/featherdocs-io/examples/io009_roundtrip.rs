@@ -6,7 +6,7 @@ use featherdocs_io::fdoz;
 fn executar(destino: &std::path::Path) -> Result<(), String> {
     let mut documento = Documento::vazio();
     documento.meta.titulo = "Documento ⚡ UTF-8".into();
-    documento.meta.autor = "Equipe FeatherOffice".into();
+    documento.meta.autor = "Equipe FeatherWorks".into();
     documento.acrescentar(Conteudo::Titulo {
         nivel: 1,
         texto: analisar("Documento ⚡ UTF-8"),

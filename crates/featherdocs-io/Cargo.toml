@@ -19,10 +19,10 @@ description = "Ler e gravar os arquivos do FeatherDocs: .fdoz (próprio), Markdo
 featherdocs-core = { path = "../featherdocs-core" }
 # Fórmulas: LaTeX ↔ OMML (a equação nativa do Word) no .docx.
 feather-math = { path = "../feather-math" }
-feather-charts = { git = "https://github.com/FeatherOffice/feather-charts", tag = "v0.3.1" }
-feather-draw = { git = "https://github.com/FeatherOffice/feather-draw", tag = "v0.1.1" }
+feather-charts = { git = "https://github.com/feather-works/feather-charts", tag = "v0.3.2" }
+feather-draw = { git = "https://github.com/feather-works/feather-draw", tag = "v0.1.1" }
 # Base64/data URLs são compartilhados com Slide; formatos DOCX/FDOZ permanecem neste crate.
-feather-image = { git = "https://github.com/FeatherOffice/feather-io", tag = "v0.1.1" }
+feather-image = { git = "https://github.com/feather-works/feather-io", tag = "v0.1.3" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
 zip = { version = "4.2.0", default-features = false, features = ["deflate"] }

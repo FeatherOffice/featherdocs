@@ -9,7 +9,7 @@ fn modelo() -> (Documento, u64) {
     let id = documento.acrescentar(Conteudo::Tabela {
         cabecalho: true,
         linhas: vec![
-            vec![vec![Trecho::simples("FeatherOffice")], Vec::new(), vec![Trecho::simples("Valor")]],
+            vec![vec![Trecho::simples("FeatherWorks")], Vec::new(), vec![Trecho::simples("Valor")]],
             vec![vec![Trecho::simples("Outro")], Vec::new(), Vec::new()],
         ],
     });
@@ -59,7 +59,7 @@ fn docx_emite_gridspan_e_celula_so_uma_vez() {
     zip.by_name("word/document.xml").unwrap().read_to_string(&mut xml).unwrap();
     assert!(xml.contains("<w:gridSpan w:val=\"2\"/>"));
     assert_eq!(xml.matches("<w:gridSpan w:val=\"2\"/>").count(), 1);
-    assert!(xml.contains("FeatherOffice"));
+    assert!(xml.contains("FeatherWorks"));
     assert!(xml.contains("Valor"));
 }
 

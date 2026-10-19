@@ -1,6 +1,6 @@
 # FeatherDocs
 
-**Editor de documentos da suíte FeatherOffice, escrito em Rust com interface
+**Editor de documentos da suíte FeatherWorks, escrito em Rust com interface
 nativa Iced.** Escreve, abre e grava `.docx`, LaTeX e Markdown, com o histórico
 de versões guardado dentro do próprio arquivo, sem conta e sem nuvem.
 
@@ -17,7 +17,7 @@ de versões guardado dentro do próprio arquivo, sem conta e sem nuvem.
 | **LaTeX** | lê `.tex` com corpus de testes de paridade, fórmulas pelo `feather-math`, painel de código ao lado do papel e aba de configuração (classe, pacotes, preâmbulo) |
 | **Markdown** | editar e ver lado a lado |
 | **Referências** | bibliografia, campos e revisão de texto |
-| **Imagens e gráficos** | efeitos de imagem e gráficos pelo motor comum [`feather-charts`](https://github.com/FeatherOffice/feather-charts) |
+| **Imagens e gráficos** | efeitos de imagem e gráficos pelo motor comum [`feather-charts`](https://github.com/feather-works/feather-charts) |
 
 ## Um interpretador de LaTeX próprio (em construção)
 
@@ -81,10 +81,10 @@ documento ficam dentro do arquivo, sem servidor.
 ## Compilar
 
 O repositório compila sozinho: as bibliotecas comuns da suíte
-([`feather-ui`](https://github.com/FeatherOffice/feather-ui),
-[`feather-draw`](https://github.com/FeatherOffice/feather-draw),
-[`feather-charts`](https://github.com/FeatherOffice/feather-charts) e
-[`feather-io`](https://github.com/FeatherOffice/feather-io)) entram por tag git.
+([`feather-ui`](https://github.com/feather-works/feather-ui),
+[`feather-draw`](https://github.com/feather-works/feather-draw),
+[`feather-charts`](https://github.com/feather-works/feather-charts) e
+[`feather-io`](https://github.com/feather-works/feather-io)) entram por tag git.
 
 ```sh
 cd crates/featherdocs-gui
